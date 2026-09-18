@@ -1,0 +1,145 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+/**
+ * Release signing, read from a file that is NOT in version control.
+ *
+ * keystore.properties holds the passwords to the key that identifies this app to Google Play
+ * forever. Committing it hands anyone with repo access the ability to publish an update, and
+ * losing it means the app can never be updated again under the same listing - back it up
+ * somewhere other than this machine.
+ *
+ * Absent file = release builds fall back to unsigned. That is deliberate: a missing keystore
+ * should fail at `apk install` with a clear signature error, not silently produce a release
+ * signed with the debug key, which cannot be published and looks identical in the output dir.
+ *
+ * Create it with:
+ *   keytool -genkeypair -v -keystore nexus-release.jks -alias nexus -keyalg RSA -keysize 4096 -validity 10000
+ */
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace "io.nexus.app"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "io.nexus.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    signingConfigs {
+        release {
+            if (keystoreProperties.containsKey('storeFile')) {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            /*
+             * minifyEnabled STAYS FALSE, and this is not laziness.
+             *
+             * The Go core is reached through gomobile-generated JNI bindings, and every one of
+             * those classes is looked up BY NAME from native code that R8 cannot see. R8 would
+             * strip or rename them, and the failure is not a build error - it is a
+             * ClassNotFoundException at connect time, in release only, on a user's phone.
+             *
+             * Enabling it needs keep rules for io.nexus.libbox.**, go.**, and every
+             * PlatformInterface implementation, plus a release-build smoke test on device.
+             * That is a reviewed change, not a checkbox.
+             */
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+
+            signingConfig keystoreProperties.containsKey('storeFile') ? signingConfigs.release : null
+        }
+        debug {
+            /*
+             * NO applicationIdSuffix, deliberately.
+             *
+             * Suffixing the debug id lets a debug and a release build coexist, which is
+             * genuinely useful - but it also means `adb install -r` of a debug APK installs a
+             * SECOND app beside the existing one rather than upgrading it. Two Nexus icons in
+             * the launcher already cost this project an evening of debugging once, and
+             * reintroducing that to save an uninstall is the wrong trade.
+             *
+             * To test a release candidate beside the debug build, add the suffix temporarily.
+             */
+            versionNameSuffix '-debug'
+        }
+    }
+
+    /*
+     * The AAR carries arm64-v8a only (core/scripts/build-android.sh targets android/arm64), so
+     * the APK must not claim to support anything else - a 32-bit device would install it and
+     * then crash on the first JNI call with UnsatisfiedLinkError.
+     */
+    splits {
+        abi {
+            enable false
+        }
+    }
+
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    // '*.aar' added: Capacitor's generated fileTree covers *.jar only, so nexus.aar would be
+    // silently ignored and every io.nexus.libbox.* import would fail to resolve.
+    implementation fileTree(include: ['*.jar', '*.aar'], dir: 'libs')
+
+    // core-ktx supplies ContextCompat.registerReceiver (the API 33+ exported flag) and
+    // ServiceCompat.startForeground (the 3-arg form carrying the foreground-service type).
+    // Both are load-bearing in NexusVpnService/PowerReceiver/TunnelNotification.
+    implementation "androidx.core:core-ktx:$androidxCoreVersion"
+    implementation "androidx.activity:activity-ktx:$androidxActivityVersion"
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ===================== Nexus VPN ===================== -->
+
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- systemExempted is the correct foreground-service type for a VpnService: VPN apps are
+         explicitly eligible, and unlike dataSync it is not subject to the 6h/24h timeout that
+         would silently kill a long-lived tunnel. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <!-- Fallback type. The system decides foreground-service-type eligibility at RUNTIME, and
+         it refuses systemExempted for a VpnService that has not yet called establish() — which
+         is exactly our situation, because startForeground must happen first. Declaring both
+         lets TunnelNotification try systemExempted and fall back instead of crashing. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- NOT requested, deliberately: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS. The whole product
+         thesis is that we do not need a Doze exemption to stay useful; asking for one is an
+         admission the power policy does not work, and Play review treats it as a red flag.
+         Also no QUERY_ALL_PACKAGES — per-app routing uses the launcher query below. -->
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <!--
+      allowBackup=false, overriding the Capacitor template default of true.
+
+      The app's private storage holds the VLESS UUID and the subscription URL, both of which
+      are bearer credentials, plus the list of servers the user connects to. With backup on,
+      `adb backup` extracts all of it with no root, and Android also ships it to Google Drive.
+      The two rules files keep it excluded even if a future library flips the flag back on.
+
+      Cleartext stays ENABLED, deliberately: subscription links over plain http:// are a
+      requested feature and many panels serve only http. The exposure is bounded and visible -
+      useSubscriptions records `insecure` for any http:// source and ServersView shows an HTTP
+      badge on it, so the user is told which of their lists travelled in the clear. It is the
+      only cleartext path in the app: proxy traffic is VLESS and every DNS server in the
+      generated config is DoH.
+    -->
+    <!--
+      Camera, for scanning config QR codes.
+
+      Declared only; the runtime prompt is raised by Capacitor's WebChromeClient the first
+      time the scanner calls getUserMedia, so there is no plugin and no Play Services in the
+      path. required="false" keeps the app installable on a device without a camera - the
+      scanner reports "No camera available" and every other import route still works.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+        <!-- ===================== Nexus VPN ===================== -->
+
+        <!-- android:process=":core" puts the core in its own process. Not required on Android,
+             but we adopt the Apple topology on both platforms deliberately: the WebView's heap
+             is not in the tunnel process, killing the UI cannot take the tunnel with it, and
+             the same IPC contract is exercised on both platforms so a bug cannot hide here and
+             surface only on iOS.
+
+             PowerReceiver is registered BY this service, inside :core, so screen and Doze
+             events reach the Go PowerController with zero IPC. -->
+        <service
+            android:name="io.nexus.plugin.NexusVpnService"
+            android:process=":core"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="systemExempted|specialUse"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+
+            <!-- Required whenever specialUse is declared. Google Play reviews this string at
+                 submission, so it has to describe the actual use, not a placeholder. -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains the user-initiated VPN tunnel for the lifetime of the connection." />
+            <meta-data
+                android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+                android:value="true" />
+        </service>
+
+        <receiver
+            android:name="io.nexus.plugin.BootReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- NO manifest receiver for ACTION_SCREEN_ON/OFF: the platform refuses to deliver
+             those to manifest receivers by design, precisely so sleeping apps are not woken.
+             PowerReceiver registers at runtime from inside the service. -->
+
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

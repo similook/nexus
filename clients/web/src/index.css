@@ -1,0 +1,101 @@
+/*
+ * Self-hosted fonts, not the Google Fonts CDN the mockup used.
+ *
+ * A packaged app has to render correctly offline and on first launch. A webfont fetched at
+ * startup is a blocking paint, a radio wakeup, and a flash of fallback text on every cold
+ * start. @fontsource bundles the woff2 into the build.
+ *
+ * LATIN SUBSETS ONLY, and only the weights the mockup uses. The unscoped `@fontsource/x/400.css`
+ * entry points pull cyrillic, cyrillic-ext, vietnamese and latin-ext too — that measured at
+ * 696 KB of the first build's 972 KB. Add a subset back when the app ships that language, not
+ * before.
+ */
+@import '@fontsource/plus-jakarta-sans/latin-400.css';
+@import '@fontsource/plus-jakarta-sans/latin-500.css';
+@import '@fontsource/plus-jakarta-sans/latin-600.css';
+@import '@fontsource/plus-jakarta-sans/latin-700.css';
+@import '@fontsource/plus-jakarta-sans/latin-800.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';
+@import '@fontsource/jetbrains-mono/latin-600.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /*
+   * Height chains from the real viewport, not from a unit.
+   *
+   * The previous version put h-[100dvh] on the shell while body used min-h-screen (100vh). In
+   * an Android WebView those two are not the same number once system bars are involved, so the
+   * centred shell was sized against one viewport and positioned against another — which is why
+   * the app looked short and the bottom bar appeared to move between screens.
+   *
+   * html/body/#root at height:100% makes every descendant measure against the actual painted
+   * area, whatever the WebView decides that is this frame.
+   */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-brand-navy text-slate-100 font-sans antialiased;
+    @apply overflow-hidden;
+    @apply selection:bg-brand-orange selection:text-white;
+    /* Never let the page itself scroll; scrolling belongs to individual views. A scrolling
+       body is what lets a fixed-looking bottom bar drift on mobile. */
+    overscroll-behavior: none;
+  }
+
+  #root {
+    @apply flex justify-center;
+  }
+
+  /*
+   * Kill the tap-highlight and long-press callout. On a native WebView these are the two
+   * things that most obviously give away that a screen is HTML rather than an app.
+   */
+  * {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+}
+
+@layer components {
+  /* Lifted from the mockup's raw <style> block. */
+  .terminal-scroll::-webkit-scrollbar,
+  .custom-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .terminal-scroll::-webkit-scrollbar-track,
+  .custom-scroll::-webkit-scrollbar-track {
+    background: rgba(14, 23, 38, 0.5);
+  }
+
+  .terminal-scroll::-webkit-scrollbar-thumb,
+  .custom-scroll::-webkit-scrollbar-thumb {
+    background: #1e2d4a;
+    border-radius: 4px;
+  }
+
+  .terminal-scroll::-webkit-scrollbar-thumb:hover,
+  .custom-scroll::-webkit-scrollbar-thumb:hover {
+    background: #ff6b00;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * The connect button's pulse ring runs continuously while connected. Respecting the OS
+   * preference is an accessibility requirement, and an always-running compositor animation
+   * is also exactly the kind of thing this project has opinions about.
+   */
+  .animate-pulse-ring,
+  .animate-pulse {
+    animation: none !important;
+  }
+}

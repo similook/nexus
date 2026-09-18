@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/OWNER/REPO/security/advisories/new
+    about: >-
+      Report privately, not as a public issue. This is a censorship-circumvention tool, and a
+      public report of a leak or deanonymisation bug is actionable by an adversary before it
+      can be fixed.
+  - name: My provider's server is down
+    url: https://github.com/OWNER/REPO/discussions
+    about: >-
+      Nexus is a client. If a node fails in every client, the server is the problem and your
+      subscription provider is the one who can fix it.

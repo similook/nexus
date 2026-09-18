@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ============================================================================
+         Permissions
+         ============================================================================ -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Foreground service. systemExempted is the correct type for a VpnService: VPN apps
+         are explicitly listed as eligible, and unlike dataSync it is not subject to the
+         6-hour-per-24h timeout that would silently kill a long-lived tunnel.
+         Declaring it without being an actual VPN throws ForegroundServiceTypeNotAllowedException. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+
+    <!-- The persistent notification. Without this the tunnel still runs, but the user sees
+         nothing, so we request it and degrade gracefully if denied. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Reconnect on boot if the user enabled always-on. Gated behind a user setting —
+         never on by default. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- NOT REQUESTED, deliberately:
+         REQUEST_IGNORE_BATTERY_OPTIMIZATIONS — the whole product thesis is that we do not
+         need a Doze exemption to stay useful. Asking for one is an admission that the power
+         policy does not work, and Play review treats it as a red flag. If a device-specific
+         bug ever seems to need it, that is a bug report, not a permission.
+
+         QUERY_ALL_PACKAGES — per-app routing uses the launcher-intent query below instead.
+         QUERY_ALL_PACKAGES is a Play policy declaration we do not want to have to justify. -->
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application>
+
+        <!-- ========================================================================
+             Tunnel service
+             ========================================================================
+
+             android:process=":core" puts the core in its own process.
+
+             This is not required on Android — VpnService can share the app process — but we
+             adopt the Apple topology on both platforms deliberately (core/docs/ipc-boundary.md
+             §1). Concretely it buys us:
+
+               * The WebView's heap is not in the same process as the tunnel, so the low-memory
+                 killer's view of the tunnel matches what we measure in bench/B-03.
+               * Killing/restarting the UI cannot take the tunnel with it.
+               * The same IPC contract is exercised on both platforms, so an IPC bug cannot
+                 hide on Android and surface only on iOS.
+
+             Cost: lifecycle signals must not cross the process boundary on a hot path. They
+             do not — PowerReceiver is registered BY this service, inside :core, so screen and
+             Doze events reach the Go PowerController with zero IPC. -->
+        <service
+            android:name="io.nexus.plugin.NexusVpnService"
+            android:process=":core"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="systemExempted"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+                android:value="true" />
+        </service>
+
+        <!-- Boot receiver. Only acts when the user has explicitly enabled auto-connect.
+             Note Android 15+ restricts which FGS types a BOOT_COMPLETED receiver may start;
+             systemExempted is permitted, but verify on the target API before relying on it. -->
+        <receiver
+            android:name="io.nexus.plugin.BootReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- NO manifest-declared receiver for ACTION_SCREEN_ON / ACTION_SCREEN_OFF.
+             Those are not deliverable to manifest receivers by design — the platform only
+             delivers them to receivers registered at runtime, precisely so that sleeping apps
+             are not woken. PowerReceiver registers dynamically from inside the service.
+             See PowerReceiver.kt. -->
+
+    </application>
+</manifest>

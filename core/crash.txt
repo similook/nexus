@@ -1,0 +1,459 @@
+--------- beginning of main
+09-15 13:41:14.042 31552 31658 I GoLog   : from tcp:127.0.0.1:50274 accepted tcp:149.154.167.91:443 [socks >> proxy]
+09-15 13:41:14.992 31552  7300 I GoLog   : from tcp:127.0.0.1:50284 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:41:21.647 31552 31581 I GoLog   : from udp:127.0.0.1:45896 accepted udp:57.144.222.141:443 [socks -> block]
+09-15 13:41:21.845 31552 31581 I GoLog   : from tcp:127.0.0.1:50518 accepted tcp:57.144.222.141:443 [socks >> proxy]
+09-15 13:41:37.497 31552 31658 I GoLog   : from tcp:127.0.0.1:48678 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:41:37.511 31552 31659 I GoLog   : from tcp:127.0.0.1:48684 accepted tcp:149.154.175.57:5222 [socks >> proxy]
+09-15 13:41:38.073 31552  7300 I GoLog   : from tcp:127.0.0.1:48696 accepted tcp:149.154.167.92:443 [socks >> proxy]
+09-15 13:41:41.210 31552 31659 I GoLog   : from tcp:127.0.0.1:48706 accepted tcp:149.154.167.91:5222 [socks >> proxy]
+09-15 13:41:41.218 31552 31604 I GoLog   : from tcp:127.0.0.1:48716 accepted tcp:149.154.167.92:443 [socks >> proxy]
+09-15 13:41:41.218 31552 31604 I GoLog   : from tcp:127.0.0.1:48720 accepted tcp:149.154.175.57:5222 [socks >> proxy]
+09-15 13:41:41.461 31552  7300 I GoLog   : from tcp:127.0.0.1:48734 accepted tcp:149.154.167.91:443 [socks >> proxy]
+09-15 13:41:41.652 31552 31659 I GoLog   : from tcp:127.0.0.1:48736 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:41:49.209 31552  7300 I GoLog   : from tcp:127.0.0.1:48290 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:41:51.104 12162 12162 D NexusPlugin: status client not connected: probe command server: rpc error: code = DeadlineExceeded desc = latest balancer error: connection error: desc = "transport: Error while dialing: dial unix command.sock: connect: no such file or directory"
+09-15 13:41:53.193 31552  7300 I GoLog   : from tcp:127.0.0.1:48298 accepted tcp:149.154.167.91:443 [socks >> proxy]
+09-15 13:41:53.303 31552  7300 I GoLog   : from tcp:127.0.0.1:48310 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:41:55.546 12162 13079 D NexusPlugin: status client not connected: probe command server: rpc error: code = DeadlineExceeded desc = latest balancer error: connection error: desc = "transport: Error while dialing: dial unix command.sock: connect: no such file or directory"
+09-15 13:41:55.966 31552 31658 I GoLog   : from tcp:127.0.0.1:60578 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:41:58.030 31552 31659 I GoLog   : from tcp:127.0.0.1:60590 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:41:59.962 31552 31604 I GoLog   : from tcp:127.0.0.1:60594 accepted tcp:149.154.167.91:443 [socks >> proxy]
+09-15 13:42:00.669 31552 31581 I GoLog   : from tcp:127.0.0.1:60610 accepted tcp:149.154.175.57:443 [socks >> proxy]
+09-15 13:42:05.926 13102 13102 I NexusNotification: foreground service started (type=systemExempted)
+09-15 13:42:06.067 13102     0 E Go      : panic: runtime error: invalid memory address or nil pointer dereference
+09-15 13:42:06.067 13102     0 E Go      : [signal SIGSEGV: segmentation violation code=0x1 addr=0x8 pc=0x78a81e30b4]
+09-15 13:42:06.067 13102     0 E Go      : 
+09-15 13:42:06.068 13102     0 E Go      : goroutine 17 [running, locked to thread]:
+09-15 13:42:06.072 13102     0 E Go      : github.com/sagernet/sing-box/experimental/libbox.(*CommandServer).StartOrReloadService(0x789a774150, {0x789a5c2000, 0x194}, 0x0)
+09-15 13:42:06.072 13102     0 E Go      : 	github.com/sagernet/sing-box@v1.14.0/experimental/libbox/command_server.go:214 +0x94
+09-15 13:42:06.075 13102     0 E Go      : github.com/nexus/nexus-core/nexuscore.(*Service).Start(0x789a715d40)
+09-15 13:42:06.075 13102     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/service.go:111 +0xc8
+09-15 13:42:06.078 13102     0 E Go      : main.proxynexuscore_Service_Start(0xffffffe8?)
+09-15 13:42:06.078 13102     0 E Go      : 	gobind/gobind/go_nexuscoremain.go:203 +0x38
+09-15 13:42:06.081 13102     0 E Go      : 
+09-15 13:42:06.082 13102     0 E Go      : goroutine 18 [IO wait]:
+09-15 13:42:06.082 13102     0 E Go      : internal/poll.runtime_pollWait(0x7bfbbeb000, 0x72)
+09-15 13:42:06.082 13102     0 E Go      : 	runtime/netpoll.go:351 +0xa0
+09-15 13:42:06.084 13102     0 E Go      : internal/poll.(*pollDesc).wait(0x789a59a000?, 0x789a4ee007?, 0x1)
+09-15 13:42:06.084 13102     0 E Go      : 	internal/poll/fd_poll_runtime.go:84 +0x28
+09-15 13:42:06.084 13102     0 E Go      : internal/poll.(*pollDesc).waitRead(...)
+09-15 13:42:06.085 13102     0 E Go      : 	internal/poll/fd_poll_runtime.go:89
+09-15 13:42:06.085 13102     0 E Go      : internal/poll.(*FD).Read(0x789a59a000, {0x789a4ee007, 0x3f9, 0x3f9})
+09-15 13:42:06.086 13102     0 E Go      : 	internal/poll/fd_unix.go:170 +0x22c
+09-15 13:42:06.086 13102     0 E Go      : os.(*File).read(...)
+09-15 13:42:06.086 13102     0 E Go      : 	os/file_posix.go:30
+09-15 13:42:06.086 13102     0 E Go      : os.(*File).Read(0x789a58e010, {0x789a4ee007?, 0x7bfbd234e8?, 0x41?})
+09-15 13:42:06.086 13102     0 E Go      : 	os/file.go:144 +0x68
+09-15 13:42:06.105 13102     0 E Go      : bufio.(*Reader).fill(0x789a426750)
+09-15 13:42:06.105 13102     0 E Go      : 	bufio/bufio.go:113 +0xdc
+09-15 13:42:06.105 13102     0 E Go      : bufio.(*Reader).ReadSlice(0x789a426750, 0xa)
+09-15 13:42:06.105 13102     0 E Go      : 	bufio/bufio.go:377 +0x30
+09-15 13:42:06.107 13102     0 E Go      : bufio.(*Reader).ReadLine(0x789a426750)
+09-15 13:42:06.107 13102     0 E Go      : 	bufio/bufio.go:406 +0x24
+09-15 13:42:06.109 13102     0 E Go      : golang.org/x/mobile/internal/mobileinit.lineLog(0x789a58e010, 0x6)
+09-15 13:42:06.109 13102     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:55 +0xcc
+09-15 13:42:06.110 13102     0 E Go      : created by golang.org/x/mobile/internal/mobileinit.init.0 in goroutine 1
+09-15 13:42:06.111 13102     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:82 +0x10c
+09-15 13:42:06.111 13102     0 E Go      : 
+09-15 13:42:06.114 13102     0 E Go      : goroutine 19 [IO wait]:
+09-15 13:42:06.114 13102     0 E Go      : internal/poll.runtime_pollWait(0x7bfbbeac00, 0x72)
+09-15 13:42:06.114 13102     0 E Go      : 	runtime/netpoll.go:351 +0xa0
+09-15 13:42:06.115 13102     0 E Go      : internal/poll.(*pollDesc).wait(0x789a59a0c0?, 0x789a4ee400?, 0x1)
+09-15 13:42:06.115 13102     0 E Go      : 	internal/poll/fd_poll_runtime.go:84 +0x28
+09-15 13:42:06.115 13102     0 E Go      : internal/poll.(*pollDesc).waitRead(...)
+09-15 13:42:06.115 13102     0 E Go      : 	internal/poll/fd_poll_runtime.go:89
+09-15 13:42:06.115 13102     0 E Go      : internal/poll.(*FD).Read(0x789a59a0c0, {0x789a4ee400, 0x400, 0x400})
+09-15 13:42:06.116 13102     0 E Go      : 	internal/poll/fd_unix.go:170 +0x22c
+09-15 13:42:06.116 13102     0 E Go      : os.(*File).read(...)
+09-15 13:42:06.116 13102     0 E Go      : 	os/file_posix.go:30
+09-15 13:42:06.116 13102     0 E Go      : os.(*File).Read(0x789a58e020, {0x789a4ee400?, 0x0?, 0x0?})
+09-15 13:42:06.116 13102     0 E Go      : 	os/file.go:144 +0x68
+09-15 13:42:06.117 13102     0 E Go      : bufio.(*Reader).fill(0x789a426f50)
+09-15 13:42:06.117 13102     0 E Go      : 	bufio/bufio.go:113 +0xdc
+09-15 13:42:06.117 13102     0 E Go      : bufio.(*Reader).ReadSlice(0x789a426f50, 0xa)
+09-15 13:42:06.117 13102     0 E Go      : 	bufio/bufio.go:377 +0x30
+09-15 13:42:06.117 13102     0 E Go      : bufio.(*Reader).ReadLine(0x789a426f50)
+09-15 13:42:06.117 13102     0 E Go      : 	bufio/bufio.go:406 +0x24
+09-15 13:42:06.117 13102     0 E Go      : golang.org/x/mobile/internal/mobileinit.lineLog(0x789a58e020, 0x4)
+09-15 13:42:06.117 13102     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:55 +0xcc
+09-15 13:42:06.118 13102     0 E Go      : created by golang.org/x/mobile/internal/mobileinit.init.0 in goroutine 1
+09-15 13:42:06.118 13102     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:92 +0x1b0
+09-15 13:42:06.118 13102     0 E Go      : 
+09-15 13:42:06.118 13102     0 E Go      : goroutine 20 [syscall]:
+09-15 13:42:06.118 13102     0 E Go      : os/signal.signal_recv()
+09-15 13:42:06.118 13102     0 E Go      : 	runtime/sigqueue.go:152 +0x114
+09-15 13:42:06.118 13102     0 E Go      : os/signal.loop()
+09-15 13:42:06.118 13102     0 E Go      : 	os/signal/signal_unix.go:23 +0x1c
+09-15 13:42:06.118 13102     0 E Go      : created by os/signal.Notify.func2.1 in goroutine 1
+09-15 13:42:06.119 13102     0 E Go      : 	os/signal/signal.go:164 +0x28
+09-15 13:42:06.119 13102     0 E Go      : 
+09-15 13:42:06.119 13102     0 E Go      : goroutine 36 [select]:
+09-15 13:42:06.121 13102     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a833b1a0)
+09-15 13:42:06.121 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:06.123 13102     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:06.126 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:06.127 13102     0 E Go      : 
+09-15 13:42:06.127 13102     0 E Go      : goroutine 37 [select]:
+09-15 13:42:06.127 13102     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a833b0e0)
+09-15 13:42:06.128 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:06.128 13102     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:06.128 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:06.128 13102     0 E Go      : 
+09-15 13:42:06.129 13102     0 E Go      : goroutine 38 [select]:
+09-15 13:42:06.129 13102     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a833af60)
+09-15 13:42:06.129 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x80
+09-15 13:42:06.129 13102     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:06.129 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:06.129 13102     0 E Go      : 
+09-15 13:42:06.129 13102     0 E Go      : goroutine 39 [select]:
+09-15 13:42:06.130 13102     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a833af60)
+09-15 13:42:06.130 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x80
+09-15 13:42:06.130 13102     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:06.131 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:06.131 13102     0 E Go      : 
+09-15 13:42:06.131 13102     0 E Go      : goroutine 40 [select]:
+09-15 13:42:06.131 13102     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a833aea0)
+09-15 13:42:06.131 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:06.131 13102     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:06.132 13102     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:06.132 13102     0 E Go      : 
+09-15 13:42:06.133 13102     0 E Go      : goroutine 41 [select]:
+09-15 13:42:06.135 13102     0 E Go      : github.com/nexus/nexus-core/nexuscore.(*coalescer).loop(0x789a778330, 0x789a774310, 0x789a6ec620)
+09-15 13:42:06.135 13102     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/power.go:320 +0x74
+09-15 13:42:06.135 13102     0 E Go      : created by github.com/nexus/nexus-core/nexuscore.(*coalescer).startLocked in goroutine 17
+09-15 13:42:06.136 13102     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/power.go:306 +0x104
+09-15 13:42:06.136 13102     0 E Go      : 
+09-15 13:42:06.136 13102     0 E Go      : goroutine 51 [IO wait]:
+09-15 13:42:06.136 13102     0 E Go      : internal/poll.runtime_pollWait(0x7bfbbea800, 0x72)
+09-15 13:42:06.136 13102     0 E Go      : 	runtime/netpoll.go:351 +0xa0
+09-15 13:42:06.136 13102     0 E Go      : internal/poll.(*pollDesc).wait(0x789a802000?, 0x78a76501f0?, 0x0)
+09-15 13:42:06.136 13102     0 E Go      : 	internal/poll/fd_poll_runtime.go:84 +0x28
+09-15 13:42:06.137 13102     0 E Go      : internal/poll.(*pollDesc).waitRead(...)
+09-15 13:42:06.137 13102     0 E Go      : 	internal/poll/fd_poll_runtime.go:89
+09-15 13:42:06.137 13102     0 E Go      : internal/poll.(*FD).Accept(0x789a802000)
+09-15 13:42:06.137 13102     0 E Go      : 	internal/poll/fd_unix.go:618 +0x210
+09-15 13:42:06.138 13102     0 E Go      : net.(*netFD).accept(0x789a802000)
+09-15 13:42:06.138 13102     0 E Go      : 	net/fd_unix.go:149 +0x28
+09-15 13:42:06.139 13102     0 E Go      : net.(*UnixListener).accept(0x78a89c88f8?)
+09-15 13:42:06.139 13102     0 E Go      : 	net/unixsock_posix.go:172 +0x20
+09-15 13:42:06.139 13102     0 E Go      : net.(*UnixListener).Accept(0x789a806030)
+09-15 13:42:06.140 13102     0 E Go      : 	net/unixsock.go:275 +0x2c
+09-15 13:42:06.140 13102     0 E Go      : google.golang.org/grpc.(*Server).Serve(0x789a814008, {0x78a89c8568, 0x789a806030})
+09-15 13:42:06.140 13102     0 E Go      : 	google.golang.org/grpc@v1.79.1/server.go:917 +0x3dc
+09-15 13:42:06.141 13102     0 E Go      : created by github.com/sagernet/sing-box/experimental/libbox.(*CommandServer).Start in goroutine 17
+09-15 13:42:06.141 13102     0 E Go      : 	github.com/sagernet/sing-box@v1.14.0/experimental/libbox/command_server.go:188 +0x52c
+--------- beginning of crash
+09-15 13:42:06.148 13102 13102 F libc    : Fatal signal 6 (SIGABRT), code -6 (SI_TKILL) in tid 13102 (.nexus.app:core), pid 13102 (.nexus.app:core)
+09-15 13:42:09.317 13416 13416 F DEBUG   : *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+09-15 13:42:09.317 13416 13416 F DEBUG   : Build fingerprint: 'samsung/a33xnsdxx/a33x:16/BP2A.250605.031.A3/A336EDXSJGZG3:user/release-keys'
+09-15 13:42:09.317 13416 13416 F DEBUG   : Revision: '4'
+09-15 13:42:09.317 13416 13416 F DEBUG   : ABI: 'arm64'
+09-15 13:42:09.317 13416 13416 F DEBUG   : Processor: '4'
+09-15 13:42:09.317 13416 13416 F DEBUG   : Timestamp: 2026-09-15 13:42:06.682182030+0330
+09-15 13:42:09.317 13416 13416 F DEBUG   : Process uptime: 20s
+09-15 13:42:09.317 13416 13416 F DEBUG   : Cmdline: io.nexus.app:core
+09-15 13:42:09.317 13416 13416 F DEBUG   : pid: 13102, tid: 13102, name: .nexus.app:core  >>> io.nexus.app:core <<<
+09-15 13:42:09.317 13416 13416 F DEBUG   : uid: 10572
+09-15 13:42:09.317 13416 13416 F DEBUG   : tagged_addr_ctrl: 0000000000000001 (PR_TAGGED_ADDR_ENABLE)
+09-15 13:42:09.317 13416 13416 F DEBUG   : signal 6 (SIGABRT), code -6 (SI_TKILL), fault addr --------
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x0  0000000000000000  x1  000000000000332e  x2  0000000000000006  x3  0000000000000008
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x4  0000000000000001  x5  0000000000000001  x6  0000000000000000  x7  0000000000000001
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x8  0000000000000083  x9  00000078a5a2a810  x10 000000000000000a  x11 0000000000000030
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x12 0000000000000057  x13 000000007fffffff  x14 000000000a08289c  x15 000000010c69fce5
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x16 0000007fc35c13a0  x17 0000000026762762  x18 0000007c1d070000  x19 000000000000332e
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x20 0000007fc3dba1d0  x21 000000789a42e008  x22 0000000000000001  x23 0000007fc3dbabb0
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x24 0000000000000000  x25 0000000000000000  x26 0000000000000000  x27 0000000000000010
+09-15 13:42:09.317 13416 13416 F DEBUG   :     x28 000000789a3b0780  x29 000000789a543b38
+09-15 13:42:09.318 13416 13416 F DEBUG   :     lr  00000078a6f48c8c  sp  000000789a543b40  pc  00000078a6f74048  pst 0000000080001000
+09-15 13:42:09.318 13416 13416 F DEBUG   : 1 total frames
+09-15 13:42:09.318 13416 13416 F DEBUG   : backtrace:
+09-15 13:42:09.318 13416 13416 F DEBUG   :       #00 pc 0000000001d42048  /data/app/~~y3zn2X7W3dYt3mV_ShlvjQ==/io.nexus.app-lqRD2LJ1qo3kXcn5dufRrQ==/lib/arm64/libgojni.so
+09-15 13:42:18.071 13697 13697 I NexusNotification: foreground service started (type=systemExempted)
+09-15 13:42:18.105 13697     0 E Go      : panic: runtime error: invalid memory address or nil pointer dereference
+09-15 13:42:18.105 13697     0 E Go      : [signal SIGSEGV: segmentation violation code=0x1 addr=0x8 pc=0x78a78170b4]
+09-15 13:42:18.105 13697     0 E Go      : 
+09-15 13:42:18.105 13697     0 E Go      : goroutine 17 [running, locked to thread]:
+09-15 13:42:18.106 13697     0 E Go      : github.com/sagernet/sing-box/experimental/libbox.(*CommandServer).StartOrReloadService(0x789a896070, {0x789a7b81a0, 0x194}, 0x0)
+09-15 13:42:18.106 13697     0 E Go      : 	github.com/sagernet/sing-box@v1.14.0/experimental/libbox/command_server.go:214 +0x94
+09-15 13:42:18.106 13697     0 E Go      : github.com/nexus/nexus-core/nexuscore.(*Service).Start(0x789a7ac960)
+09-15 13:42:18.106 13697     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/service.go:111 +0xc8
+09-15 13:42:18.107 13697     0 E Go      : main.proxynexuscore_Service_Start(0xffffffe8?)
+09-15 13:42:18.107 13697     0 E Go      : 	gobind/gobind/go_nexuscoremain.go:203 +0x38
+09-15 13:42:18.107 13697     0 E Go      : 
+09-15 13:42:18.107 13697     0 E Go      : goroutine 37 [runnable]:
+09-15 13:42:18.114 13697     0 E Go      : github.com/sagernet/sing-box/experimental/libbox.(*CommandServer).Start.gowrap1()
+09-15 13:42:18.114 13697     0 E Go      : 	github.com/sagernet/sing-box@v1.14.0/experimental/libbox/command_server.go:188
+09-15 13:42:18.114 13697     0 E Go      : runtime.goexit({})
+09-15 13:42:18.114 13697     0 E Go      : 	runtime/asm_arm64.s:1039 +0x4
+09-15 13:42:18.115 13697     0 E Go      : created by github.com/sagernet/sing-box/experimental/libbox.(*CommandServer).Start in goroutine 17
+09-15 13:42:18.115 13697     0 E Go      : 	github.com/sagernet/sing-box@v1.14.0/experimental/libbox/command_server.go:188 +0x52c
+09-15 13:42:18.115 13697     0 E Go      : 
+09-15 13:42:18.115 13697     0 E Go      : goroutine 20 [IO wait]:
+09-15 13:42:18.115 13697     0 E Go      : internal/poll.runtime_pollWait(0x7bfbb17000, 0x72)
+09-15 13:42:18.115 13697     0 E Go      : 	runtime/netpoll.go:351 +0xa0
+09-15 13:42:18.115 13697     0 E Go      : internal/poll.(*pollDesc).wait(0x789a4de1e0?, 0x789a464007?, 0x1)
+09-15 13:42:18.116 13697     0 E Go      : 	internal/poll/fd_poll_runtime.go:84 +0x28
+09-15 13:42:18.116 13697     0 E Go      : internal/poll.(*pollDesc).waitRead(...)
+09-15 13:42:18.116 13697     0 E Go      : 	internal/poll/fd_poll_runtime.go:89
+09-15 13:42:18.116 13697     0 E Go      : internal/poll.(*FD).Read(0x789a4de1e0, {0x789a464007, 0x3f9, 0x3f9})
+09-15 13:42:18.116 13697     0 E Go      : 	internal/poll/fd_unix.go:170 +0x22c
+09-15 13:42:18.116 13697     0 E Go      : os.(*File).read(...)
+09-15 13:42:18.116 13697     0 E Go      : 	os/file_posix.go:30
+09-15 13:42:18.116 13697     0 E Go      : os.(*File).Read(0x789a482130, {0x789a464007?, 0x7bfbc9a108?, 0x41?})
+09-15 13:42:18.116 13697     0 E Go      : 	os/file.go:144 +0x68
+09-15 13:42:18.116 13697     0 E Go      : bufio.(*Reader).fill(0x789a429750)
+09-15 13:42:18.116 13697     0 E Go      : 	bufio/bufio.go:113 +0xdc
+09-15 13:42:18.116 13697     0 E Go      : bufio.(*Reader).ReadSlice(0x789a429750, 0xa)
+09-15 13:42:18.116 13697     0 E Go      : 	bufio/bufio.go:377 +0x30
+09-15 13:42:18.116 13697     0 E Go      : bufio.(*Reader).ReadLine(0x789a429750)
+09-15 13:42:18.116 13697     0 E Go      : 	bufio/bufio.go:406 +0x24
+09-15 13:42:18.116 13697     0 E Go      : golang.org/x/mobile/internal/mobileinit.lineLog(0x789a482130, 0x6)
+09-15 13:42:18.116 13697     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:55 +0xcc
+09-15 13:42:18.116 13697     0 E Go      : created by golang.org/x/mobile/internal/mobileinit.init.0 in goroutine 1
+09-15 13:42:18.116 13697     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:82 +0x10c
+09-15 13:42:18.116 13697     0 E Go      : 
+09-15 13:42:18.116 13697     0 E Go      : goroutine 21 [IO wait]:
+09-15 13:42:18.116 13697     0 E Go      : internal/poll.runtime_pollWait(0x7bfbb16c00, 0x72)
+09-15 13:42:18.116 13697     0 E Go      : 	runtime/netpoll.go:351 +0xa0
+09-15 13:42:18.116 13697     0 E Go      : internal/poll.(*pollDesc).wait(0x789a4de2a0?, 0x789a5b0000?, 0x1)
+09-15 13:42:18.116 13697     0 E Go      : 	internal/poll/fd_poll_runtime.go:84 +0x28
+09-15 13:42:18.116 13697     0 E Go      : internal/poll.(*pollDesc).waitRead(...)
+09-15 13:42:18.116 13697     0 E Go      : 	internal/poll/fd_poll_runtime.go:89
+09-15 13:42:18.116 13697     0 E Go      : internal/poll.(*FD).Read(0x789a4de2a0, {0x789a5b0000, 0x400, 0x400})
+09-15 13:42:18.116 13697     0 E Go      : 	internal/poll/fd_unix.go:170 +0x22c
+09-15 13:42:18.116 13697     0 E Go      : os.(*File).read(...)
+09-15 13:42:18.116 13697     0 E Go      : 	os/file_posix.go:30
+09-15 13:42:18.117 13697     0 E Go      : os.(*File).Read(0x789a482140, {0x789a5b0000?, 0x789a480008?, 0x789a5b0000?})
+09-15 13:42:18.117 13697     0 E Go      : 	os/file.go:144 +0x68
+09-15 13:42:18.117 13697     0 E Go      : bufio.(*Reader).fill(0x789a429f50)
+09-15 13:42:18.117 13697     0 E Go      : 	bufio/bufio.go:113 +0xdc
+09-15 13:42:18.117 13697     0 E Go      : bufio.(*Reader).ReadSlice(0x789a429f50, 0xa)
+09-15 13:42:18.117 13697     0 E Go      : 	bufio/bufio.go:377 +0x30
+09-15 13:42:18.117 13697     0 E Go      : bufio.(*Reader).ReadLine(0x789a429f50)
+09-15 13:42:18.117 13697     0 E Go      : 	bufio/bufio.go:406 +0x24
+09-15 13:42:18.117 13697     0 E Go      : golang.org/x/mobile/internal/mobileinit.lineLog(0x789a482140, 0x4)
+09-15 13:42:18.117 13697     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:55 +0xcc
+09-15 13:42:18.117 13697     0 E Go      : created by golang.org/x/mobile/internal/mobileinit.init.0 in goroutine 1
+09-15 13:42:18.117 13697     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:92 +0x1b0
+09-15 13:42:18.117 13697     0 E Go      : 
+09-15 13:42:18.117 13697     0 E Go      : goroutine 36 [syscall]:
+09-15 13:42:18.117 13697     0 E Go      : os/signal.signal_recv()
+09-15 13:42:18.117 13697     0 E Go      : 	runtime/sigqueue.go:152 +0x114
+09-15 13:42:18.117 13697     0 E Go      : os/signal.loop()
+09-15 13:42:18.117 13697     0 E Go      : 	os/signal/signal_unix.go:23 +0x1c
+09-15 13:42:18.117 13697     0 E Go      : created by os/signal.Notify.func2.1 in goroutine 1
+09-15 13:42:18.117 13697     0 E Go      : 	os/signal/signal.go:164 +0x28
+09-15 13:42:18.117 13697     0 E Go      : 
+09-15 13:42:18.117 13697     0 E Go      : goroutine 51 [select]:
+09-15 13:42:18.117 13697     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a796f1a0)
+09-15 13:42:18.117 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:18.117 13697     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:18.117 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:18.117 13697     0 E Go      : 
+09-15 13:42:18.117 13697     0 E Go      : goroutine 52 [select]:
+09-15 13:42:18.117 13697     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a796f0e0)
+09-15 13:42:18.117 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:18.117 13697     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:18.117 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:18.117 13697     0 E Go      : 
+09-15 13:42:18.118 13697     0 E Go      : goroutine 53 [select]:
+09-15 13:42:18.118 13697     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a796ef60)
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x80
+09-15 13:42:18.118 13697     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:18.118 13697     0 E Go      : 
+09-15 13:42:18.118 13697     0 E Go      : goroutine 54 [select]:
+09-15 13:42:18.118 13697     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a796ef60)
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x80
+09-15 13:42:18.118 13697     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:18.118 13697     0 E Go      : 
+09-15 13:42:18.118 13697     0 E Go      : goroutine 55 [select]:
+09-15 13:42:18.118 13697     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a796eea0)
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:18.118 13697     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:18.118 13697     0 E Go      : 
+09-15 13:42:18.118 13697     0 E Go      : goroutine 56 [select]:
+09-15 13:42:18.118 13697     0 E Go      : github.com/nexus/nexus-core/nexuscore.(*coalescer).loop(0x789a88e480, 0x789a896230, 0x789a89a380)
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/power.go:320 +0x74
+09-15 13:42:18.118 13697     0 E Go      : created by github.com/nexus/nexus-core/nexuscore.(*coalescer).startLocked in goroutine 17
+09-15 13:42:18.118 13697     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/power.go:306 +0x104
+09-15 13:42:18.118 13697 13697 F libc    : Fatal signal 6 (SIGABRT), code -6 (SI_TKILL) in tid 13697 (.nexus.app:core), pid 13697 (.nexus.app:core)
+09-15 13:42:18.718 13735 13735 F DEBUG   : *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+09-15 13:42:18.718 13735 13735 F DEBUG   : Build fingerprint: 'samsung/a33xnsdxx/a33x:16/BP2A.250605.031.A3/A336EDXSJGZG3:user/release-keys'
+09-15 13:42:18.718 13735 13735 F DEBUG   : Revision: '4'
+09-15 13:42:18.718 13735 13735 F DEBUG   : ABI: 'arm64'
+09-15 13:42:18.718 13735 13735 F DEBUG   : Processor: '6'
+09-15 13:42:18.718 13735 13735 F DEBUG   : Timestamp: 2026-09-15 13:42:18.270527867+0330
+09-15 13:42:18.718 13735 13735 F DEBUG   : Process uptime: 2s
+09-15 13:42:18.718 13735 13735 F DEBUG   : Cmdline: io.nexus.app:core
+09-15 13:42:18.718 13735 13735 F DEBUG   : pid: 13697, tid: 13697, name: .nexus.app:core  >>> io.nexus.app:core <<<
+09-15 13:42:18.718 13735 13735 F DEBUG   : uid: 10572
+09-15 13:42:18.718 13735 13735 F DEBUG   : tagged_addr_ctrl: 0000000000000001 (PR_TAGGED_ADDR_ENABLE)
+09-15 13:42:18.718 13735 13735 F DEBUG   : signal 6 (SIGABRT), code -6 (SI_TKILL), fault addr --------
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x0  0000000000000000  x1  0000000000003581  x2  0000000000000006  x3  0000000000000008
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x4  0000000000000001  x5  0000000000000001  x6  0000000000000000  x7  0000000000000001
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x8  0000000000000083  x9  00000078a505e810  x10 000000000000000a  x11 0000000000000030
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x12 000000000000005e  x13 000000007fffffff  x14 000000000a084000  x15 000000011ef9cd0d
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x16 0000007fc35c13a0  x17 0000000026762762  x18 0000007c1d070000  x19 0000000000003581
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x20 0000007fc3dba690  x21 000000789a430008  x22 0000000000000001  x23 0000007fc3dba8f0
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x24 0000000000000000  x25 0000000000000000  x26 0000000000000000  x27 0000000000000010
+09-15 13:42:18.718 13735 13735 F DEBUG   :     x28 000000789a3b0780  x29 000000789a809b38
+09-15 13:42:18.718 13735 13735 F DEBUG   :     lr  00000078a657cc8c  sp  000000789a809b40  pc  00000078a65a8048  pst 0000000080001000
+09-15 13:42:18.718 13735 13735 F DEBUG   : 1 total frames
+09-15 13:42:18.718 13735 13735 F DEBUG   : backtrace:
+09-15 13:42:18.718 13735 13735 F DEBUG   :       #00 pc 0000000001d42048  /data/app/~~y3zn2X7W3dYt3mV_ShlvjQ==/io.nexus.app-lqRD2LJ1qo3kXcn5dufRrQ==/lib/arm64/libgojni.so
+09-15 13:42:20.484 13795 13795 I NexusNotification: foreground service started (type=systemExempted)
+09-15 13:42:20.493 13795     0 E Go      : panic: runtime error: invalid memory address or nil pointer dereference
+09-15 13:42:20.494 13795     0 E Go      : [signal SIGSEGV: segmentation violation code=0x1 addr=0x8 pc=0x78a72130b4]
+09-15 13:42:20.494 13795     0 E Go      : 
+09-15 13:42:20.494 13795     0 E Go      : goroutine 17 [running, locked to thread]:
+09-15 13:42:20.494 13795     0 E Go      : github.com/sagernet/sing-box/experimental/libbox.(*CommandServer).StartOrReloadService(0x789a7a1490, {0x789a57e1a0, 0x194}, 0x0)
+09-15 13:42:20.494 13795     0 E Go      : 	github.com/sagernet/sing-box@v1.14.0/experimental/libbox/command_server.go:214 +0x94
+09-15 13:42:20.494 13795     0 E Go      : github.com/nexus/nexus-core/nexuscore.(*Service).Start(0x789a778570)
+09-15 13:42:20.494 13795     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/service.go:111 +0xc8
+09-15 13:42:20.495 13795     0 E Go      : main.proxynexuscore_Service_Start(0xffffffe8?)
+09-15 13:42:20.495 13795     0 E Go      : 	gobind/gobind/go_nexuscoremain.go:203 +0x38
+09-15 13:42:20.495 13795     0 E Go      : 
+09-15 13:42:20.495 13795     0 E Go      : goroutine 7 [runnable]:
+09-15 13:42:20.495 13795     0 E Go      : syscall.Syscall(0x3f, 0x5f, 0x789a580007, 0x3f9)
+09-15 13:42:20.495 13795     0 E Go      : 	syscall/syscall_linux.go:74 +0x20
+09-15 13:42:20.496 13795     0 E Go      : syscall.read(0x789a462240?, {0x789a580007?, 0x789a42cc01?, 0x78a5f56c68?})
+09-15 13:42:20.496 13795     0 E Go      : 	syscall/zsyscall_linux_arm64.go:736 +0x40
+09-15 13:42:20.496 13795     0 E Go      : syscall.Read(...)
+09-15 13:42:20.496 13795     0 E Go      : 	syscall/syscall_unix.go:183
+09-15 13:42:20.496 13795     0 E Go      : internal/poll.ignoringEINTRIO(...)
+09-15 13:42:20.496 13795     0 E Go      : 	internal/poll/fd_unix.go:743
+09-15 13:42:20.496 13795     0 E Go      : internal/poll.(*FD).Read(0x789a462240, {0x789a580007, 0x3f9, 0x3f9})
+09-15 13:42:20.497 13795     0 E Go      : 	internal/poll/fd_unix.go:166 +0x198
+09-15 13:42:20.497 13795     0 E Go      : os.(*File).read(...)
+09-15 13:42:20.497 13795     0 E Go      : 	os/file_posix.go:30
+09-15 13:42:20.497 13795     0 E Go      : os.(*File).Read(0x789a3ae158, {0x789a580007?, 0x789a480008?, 0x789a580000?})
+09-15 13:42:20.497 13795     0 E Go      : 	os/file.go:144 +0x68
+09-15 13:42:20.497 13795     0 E Go      : bufio.(*Reader).fill(0x789a42cf50)
+09-15 13:42:20.498 13795     0 E Go      : 	bufio/bufio.go:113 +0xdc
+09-15 13:42:20.498 13795     0 E Go      : bufio.(*Reader).ReadSlice(0x789a42cf50, 0xa)
+09-15 13:42:20.498 13795     0 E Go      : 	bufio/bufio.go:377 +0x30
+09-15 13:42:20.498 13795     0 E Go      : bufio.(*Reader).ReadLine(0x789a42cf50)
+09-15 13:42:20.498 13795     0 E Go      : 	bufio/bufio.go:406 +0x24
+09-15 13:42:20.498 13795     0 E Go      : golang.org/x/mobile/internal/mobileinit.lineLog(0x789a3ae158, 0x6)
+09-15 13:42:20.498 13795     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:55 +0xcc
+09-15 13:42:20.498 13795     0 E Go      : created by golang.org/x/mobile/internal/mobileinit.init.0 in goroutine 1
+09-15 13:42:20.499 13795     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:82 +0x10c
+09-15 13:42:20.499 13795     0 E Go      : 
+09-15 13:42:20.499 13795     0 E Go      : goroutine 8 [IO wait]:
+09-15 13:42:20.499 13795     0 E Go      : internal/poll.runtime_pollWait(0x7bfbca3a00, 0x72)
+09-15 13:42:20.499 13795     0 E Go      : 	runtime/netpoll.go:351 +0xa0
+09-15 13:42:20.499 13795     0 E Go      : internal/poll.(*pollDesc).wait(0x789a462300?, 0x789a492000?, 0x1)
+09-15 13:42:20.499 13795     0 E Go      : 	internal/poll/fd_poll_runtime.go:84 +0x28
+09-15 13:42:20.500 13795     0 E Go      : internal/poll.(*pollDesc).waitRead(...)
+09-15 13:42:20.500 13795     0 E Go      : 	internal/poll/fd_poll_runtime.go:89
+09-15 13:42:20.500 13795     0 E Go      : internal/poll.(*FD).Read(0x789a462300, {0x789a492000, 0x400, 0x400})
+09-15 13:42:20.500 13795     0 E Go      : 	internal/poll/fd_unix.go:170 +0x22c
+09-15 13:42:20.500 13795     0 E Go      : os.(*File).read(...)
+09-15 13:42:20.500 13795     0 E Go      : 	os/file_posix.go:30
+09-15 13:42:20.500 13795     0 E Go      : os.(*File).Read(0x789a3ae168, {0x789a492000?, 0x7bfbd234e8?, 0x41?})
+09-15 13:42:20.501 13795     0 E Go      : 	os/file.go:144 +0x68
+09-15 13:42:20.501 13795     0 E Go      : bufio.(*Reader).fill(0x789a42d750)
+09-15 13:42:20.501 13795     0 E Go      : 	bufio/bufio.go:113 +0xdc
+09-15 13:42:20.501 13795     0 E Go      : bufio.(*Reader).ReadSlice(0x789a42d750, 0xa)
+09-15 13:42:20.501 13795     0 E Go      : 	bufio/bufio.go:377 +0x30
+09-15 13:42:20.501 13795     0 E Go      : bufio.(*Reader).ReadLine(0x789a42d750)
+09-15 13:42:20.501 13795     0 E Go      : 	bufio/bufio.go:406 +0x24
+09-15 13:42:20.501 13795     0 E Go      : golang.org/x/mobile/internal/mobileinit.lineLog(0x789a3ae168, 0x4)
+09-15 13:42:20.502 13795     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:55 +0xcc
+09-15 13:42:20.502 13795     0 E Go      : created by golang.org/x/mobile/internal/mobileinit.init.0 in goroutine 1
+09-15 13:42:20.502 13795     0 E Go      : 	golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/mobileinit/mobileinit_android.go:92 +0x1b0
+09-15 13:42:20.502 13795     0 E Go      : 
+09-15 13:42:20.502 13795     0 E Go      : goroutine 34 [syscall]:
+09-15 13:42:20.502 13795     0 E Go      : os/signal.signal_recv()
+09-15 13:42:20.502 13795     0 E Go      : 	runtime/sigqueue.go:152 +0x114
+09-15 13:42:20.502 13795     0 E Go      : os/signal.loop()
+09-15 13:42:20.502 13795     0 E Go      : 	os/signal/signal_unix.go:23 +0x1c
+09-15 13:42:20.503 13795     0 E Go      : created by os/signal.Notify.func2.1 in goroutine 1
+09-15 13:42:20.503 13795     0 E Go      : 	os/signal/signal.go:164 +0x28
+09-15 13:42:20.503 13795     0 E Go      : 
+09-15 13:42:20.503 13795     0 E Go      : goroutine 20 [select]:
+09-15 13:42:20.503 13795     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a736b1a0)
+09-15 13:42:20.503 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:20.503 13795     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:20.504 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:20.504 13795     0 E Go      : 
+09-15 13:42:20.504 13795     0 E Go      : goroutine 21 [select]:
+09-15 13:42:20.504 13795     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a736b0e0)
+09-15 13:42:20.504 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:20.504 13795     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:20.504 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:20.504 13795     0 E Go      : 
+09-15 13:42:20.504 13795     0 E Go      : goroutine 22 [select]:
+09-15 13:42:20.505 13795     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a736af60)
+09-15 13:42:20.505 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x80
+09-15 13:42:20.505 13795     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:20.505 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:20.505 13795     0 E Go      : 
+09-15 13:42:20.505 13795     0 E Go      : goroutine 23 [select]:
+09-15 13:42:20.505 13795     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a736af60)
+09-15 13:42:20.505 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x80
+09-15 13:42:20.505 13795     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:20.506 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:20.506 13795     0 E Go      : 
+09-15 13:42:20.506 13795     0 E Go      : goroutine 24 [select]:
+09-15 13:42:20.506 13795     0 E Go      : github.com/sagernet/sing/common/observable.(*Observer[...]).process(0x78a736aea0)
+09-15 13:42:20.506 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:35 +0x84
+09-15 13:42:20.506 13795     0 E Go      : created by github.com/sagernet/sing/common/observable.NewObserver[...] in goroutine 17
+09-15 13:42:20.506 13795     0 E Go      : 	github.com/sagernet/sing@v0.9.0-beta.4/common/observable/observer.go:27 +0xf0
+09-15 13:42:20.506 13795     0 E Go      : 
+09-15 13:42:20.506 13795     0 E Go      : goroutine 25 [select]:
+09-15 13:42:20.507 13795     0 E Go      : github.com/nexus/nexus-core/nexuscore.(*coalescer).loop(0x789a778a80, 0x789a7a1650, 0x789a732620)
+09-15 13:42:20.507 13795     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/power.go:320 +0x74
+09-15 13:42:20.507 13795     0 E Go      : created by github.com/nexus/nexus-core/nexuscore.(*coalescer).startLocked in goroutine 17
+09-15 13:42:20.507 13795     0 E Go      : 	github.com/nexus/nexus-core@v0.0.0-00010101000000-000000000000/nexuscore/power.go:306 +0x104
+09-15 13:42:20.507 13795     0 E Go      : 
+09-15 13:42:20.507 13795     0 E Go      : goroutine 26 [syscall]:
+09-15 13:42:20.507 13795     0 E Go      : syscall.Syscall6(0xf2, 0x65, 0x789a607b8c, 0x789a607bfc, 0x80800, 0x0, 0x0)
+09-15 13:42:20.508 13795     0 E Go      : 	syscall/syscall_linux.go:96 +0x2c
+09-15 13:42:20.508 13795     0 E Go      : syscall.accept4(0x789a607c18?, 0x78a604cf00?, 0x789a5220b0?, 0x78a76d8d60?)
+09-15 13:42:20.508 13795     0 E Go      : 	syscall/zsyscall_linux_arm64.go:1361 +0x44
+09-15 13:42:20.508 13795     0 E Go      : syscall.Accept4(0x2?, 0x0?)
+09-15 13:42:20.508 13795     0 E Go      : 	syscall/syscall_linux.go:694 +0x54
+09-15 13:42:20.508 13795     0 E Go      : internal/poll.accept(0x789a587c00?)
+09-15 13:42:20.508 13795     0 E Go      : 	internal/poll/sock_cloexec.go:17 +0x30
+09-15 13:42:20.508 13795     0 E Go      : internal/poll.(*FD).Accept(0x789a587c00)
+09-15 13:42:20.509 13795     0 E Go      : 	internal/poll/fd_unix.go:609 +0x138
+09-15 13:42:20.509 13795     0 E Go      : net.(*netFD).accept(0x789a587c00)
+09-15 13:42:20.509 13795     0 E Go      : 	net/fd_unix.go:149 +0x28
+09-15 13:42:20.509 13795     0 E Go      : net.(*UnixListener).accept(0x78a79f88f8?)
+09-15 13:42:20.509 13795     0 E Go      : 	net/unixsock_posix.go:172 +0x20
+09-15 13:42:20.509 13795     0 E Go      : net.(*UnixListener).Accept(0x789a778ae0)
+09-15 13:42:20.509 13795     0 E Go      : 	net/unixsock.go:275 +0x2c
+09-15 13:42:20.509 13795     0 E Go      : google.golang.org/grpc.(*Server).Serve(0x789a5e1688, {0x78a79f8568, 0x789a778ae0})
+09-15 13:42:20.510 13795     0 E Go      : 	google.golang.org/grpc@v1.79.1/server.go:917 +0x3dc
+09-15 13:42:20.510 13795     0 E Go      : created by github.com/sagernet/sing-box/experimental/libbox.(*CommandServer).Start in goroutine 17
+09-15 13:42:20.511 13795     0 E Go      : 	github.com/sagernet/sing-box@v1.14.0/experimental/libbox/command_server.go:188 +0x52c
+09-15 13:42:20.512 13795 13795 F libc    : Fatal signal 6 (SIGABRT), code -6 (SI_TKILL) in tid 13795 (.nexus.app:core), pid 13795 (.nexus.app:core)
+09-15 13:42:21.364 13850 13850 F DEBUG   : *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+09-15 13:42:21.364 13850 13850 F DEBUG   : Build fingerprint: 'samsung/a33xnsdxx/a33x:16/BP2A.250605.031.A3/A336EDXSJGZG3:user/release-keys'
+09-15 13:42:21.364 13850 13850 F DEBUG   : Revision: '4'
+09-15 13:42:21.364 13850 13850 F DEBUG   : ABI: 'arm64'
+09-15 13:42:21.365 13850 13850 F DEBUG   : Processor: '3'
+09-15 13:42:21.365 13850 13850 F DEBUG   : Timestamp: 2026-09-15 13:42:20.677061173+0330
+09-15 13:42:21.365 13850 13850 F DEBUG   : Process uptime: 2s
+09-15 13:42:21.365 13850 13850 F DEBUG   : Cmdline: io.nexus.app:core
+09-15 13:42:21.365 13850 13850 F DEBUG   : pid: 13795, tid: 13795, name: .nexus.app:core  >>> io.nexus.app:core <<<
+09-15 13:42:21.365 13850 13850 F DEBUG   : uid: 10572
+09-15 13:42:21.365 13850 13850 F DEBUG   : tagged_addr_ctrl: 0000000000000001 (PR_TAGGED_ADDR_ENABLE)
+09-15 13:42:21.365 13850 13850 F DEBUG   : signal 6 (SIGABRT), code -6 (SI_TKILL), fault addr --------
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x0  0000000000000000  x1  00000000000035e3  x2  0000000000000006  x3  0000000000000008
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x4  0000000000000001  x5  0000000000000001  x6  0000000000000000  x7  0000000000000001
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x8  0000000000000083  x9  00000078a4a5a810  x10 000000000000000a  x11 0000000000000030
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x12 0000000000000057  x13 000000007fffffff  x14 000000000a0844ac  x15 0000000122aeeac4
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x16 0000007fc35c13a0  x17 0000000026762762  x18 0000007c1d070000  x19 00000000000035e3
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x20 0000007fc3dba690  x21 000000789a42e008  x22 0000000000000001  x23 0000007fc3dba8f0
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x24 0000000000000000  x25 0000000000000000  x26 0000000000000000  x27 0000000000000010
+09-15 13:42:21.365 13850 13850 F DEBUG   :     x28 000000789a3b0780  x29 000000789a65fb38
+09-15 13:42:21.365 13850 13850 F DEBUG   :     lr  00000078a5f78c8c  sp  000000789a65fb40  pc  00000078a5fa4048  pst 0000000080001000
+09-15 13:42:21.365 13850 13850 F DEBUG   : 1 total frames
+09-15 13:42:21.366 13850 13850 F DEBUG   : backtrace:
+09-15 13:42:21.366 13850 13850 F DEBUG   :       #00 pc 0000000001d42048  /data/app/~~y3zn2X7W3dYt3mV_ShlvjQ==/io.nexus.app-lqRD2LJ1qo3kXcn5dufRrQ==/lib/arm64/libgojni.so

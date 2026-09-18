@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 and below (android:fullBackupContent).
+
+  Nothing in this app is backed up. The app's private storage holds proxy credentials in
+  plaintext: a VLESS UUID is a bearer secret, and the subscription URL is a bearer secret for
+  the whole account. It also holds the list of servers the user connects to, which is exactly
+  the metadata a VPN exists to keep private.
+
+  With backup enabled, all of that leaves the device - to Google's servers under the user's
+  account, and to anyone who can run `adb backup`, which needs no root.
+-->
+<full-backup-content>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+</full-backup-content>

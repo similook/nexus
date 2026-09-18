@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 13+ themed-icon layer.
+
+  Flat, single-colour, no gradients and no glow: the launcher tints this to the wallpaper
+  palette, so anything with its own colour comes out wrong. The emblem is reduced to the two
+  crossing strokes, the triangle and the five nodes - the parts that still read at 48dp once
+  the glow that carries the full icon is gone.
+
+  Content is kept inside the central 66 of the 108 canvas, the adaptive safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="54" android:translateY="54">
+        <group android:scaleX="0.145" android:scaleY="0.145">
+            <group android:translateX="-256" android:translateY="-244">
+                <!-- The X -->
+                <path
+                    android:strokeColor="#000000"
+                    android:strokeWidth="22"
+                    android:strokeLineCap="round"
+                    android:pathData="M160,160 L352,352"/>
+                <path
+                    android:strokeColor="#000000"
+                    android:strokeWidth="22"
+                    android:strokeLineCap="round"
+                    android:pathData="M352,160 L160,352"/>
+                <!-- Upward triangle -->
+                <path
+                    android:strokeColor="#000000"
+                    android:strokeWidth="10"
+                    android:strokeLineCap="round"
+                    android:strokeLineJoin="round"
+                    android:pathData="M256,135 L360,315 L152,315 Z"/>
+                <!-- Nodes -->
+                <path android:fillColor="#000000" android:pathData="M256,135 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <path android:fillColor="#000000" android:pathData="M152,315 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <path android:fillColor="#000000" android:pathData="M360,315 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <!-- Core -->
+                <path android:fillColor="#000000" android:pathData="M256,256 m-36,0 a36,36 0 1,0 72,0 a36,36 0 1,0 -72,0"/>
+            </group>
+        </group>
+    </group>
+</vector>

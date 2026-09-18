@@ -1,0 +1,45 @@
+# ─── Signing. The most important lines in this file. ─────────────────────────────────────
+#
+# keystore.properties holds the passwords to the key that identifies this app forever.
+# Committing either it or the .jks lets anyone with repo access publish an update as you, and
+# on a public repo that means anyone at all.
+keystore.properties
+*.jks
+*.keystore
+
+# ─── Dependencies and build output ───────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+.gradle/
+local.properties
+*.apk
+*.aab
+*.aar
+*.so
+
+# The AAR is a 20 MB build artefact produced by core/scripts/build-android.sh. It is rebuilt
+# from source; committing it would put a binary blob in every clone and make the Go sources
+# look optional.
+clients/web/android/app/libs/*.aar
+
+# Capacitor copies the built web bundle in here on every sync.
+clients/web/android/app/src/main/assets/public/
+clients/web/android/app/src/main/assets/capacitor.config.json
+
+# ─── Generated fixtures ──────────────────────────────────────────────────────────────────
+# Rebuilt by core/scripts/check-configs.sh. They contain only fake credentials, but a stale
+# committed copy would let the checker pass against configs the app no longer generates.
+core/testdata/configs/*.json
+
+# ─── Editors and OS ──────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ─── Working files ───────────────────────────────────────────────────────────────────────
+*.log
+.env
+.env.local

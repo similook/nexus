@@ -1,0 +1,22 @@
+<!doctype html>
+<html class="dark" lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      viewport-fit=cover is what makes env(safe-area-inset-*) return real values, which the
+      mockup's header already relies on. Without it the header tucks under the notch.
+      user-scalable=no matches the mockup: pinch-zooming a VPN dashboard is never intentional.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#070D18" />
+    <title>Nexus</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

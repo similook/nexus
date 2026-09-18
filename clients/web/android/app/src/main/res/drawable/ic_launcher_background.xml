@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive-icon background: the artwork's own diagonal gradient.
+
+  A VectorDrawable rather than a rendered PNG. Adaptive icons are API 26+ and VectorDrawable
+  gradients are API 24+, so there is no compatibility argument for five more bitmaps — and the
+  launcher scales this layer by 1.5x for its parallax, which a vector survives and a bitmap
+  does not.
+
+  Colours are lifted from the source SVG's bgGrad stops.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108">
+                <item android:offset="0" android:color="#FF0F172A"/>
+                <item android:offset="0.5" android:color="#FF080E1D"/>
+                <item android:offset="1" android:color="#FF030712"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
