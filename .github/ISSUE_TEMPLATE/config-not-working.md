@@ -23,11 +23,17 @@ paste the masked URI here — keep everything after `?` intact
 
 ## What the core says
 
-From the Logs tab, or:
+**The Logs tab in the app** is the place to look, and it is enough. It shows the core's own
+output, identically on a release build and a debug one.
+
+With a cable, the same thing plus Android's side of it:
 
 ```bash
 adb logcat -c; adb logcat -v threadtime GoLog:V NexusConfigGuard:V *:S
 ```
+
+On a release build `logcat` deliberately omits the detail lines that name your server — the
+messages below all still appear.
 
 Find the line that names the failure. The common ones and what they mean:
 

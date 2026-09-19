@@ -1,6 +1,5 @@
 package io.nexus.plugin
 
-import android.util.Log
 import io.nexus.libbox.Libbox
 import org.json.JSONArray
 import org.json.JSONObject
@@ -76,11 +75,11 @@ internal object ConfigGuard {
         val resolved = resolveOutboundServers(root)
 
         if (clamped > 0) {
-            Log.w(TAG, "clamped $clamped health-check interval(s) to ${MIN_HEALTH_CHECK_SECONDS}s")
+            NexusLog.w(TAG, "clamped $clamped health-check interval(s) to ${MIN_HEALTH_CHECK_SECONDS}s")
         }
 
         if (resolved > 0) {
-            Log.i(TAG, "pre-resolved $resolved outbound server hostname(s)")
+            NexusLog.i(TAG, "pre-resolved $resolved outbound server hostname(s)")
         }
 
 
@@ -89,7 +88,7 @@ internal object ConfigGuard {
         // and that ambiguity cost a full debug cycle: the DNS block was added, the APK was
         // rebuilt, and the device kept using a stored config that predated it.
         val dns = root.optJSONObject("dns")
-        Log.i(
+        NexusLog.i(
             TAG,
             "config accepted: dns=" +
                 if (dns == null) "ABSENT (DNS will fall back to the system resolver)"
@@ -150,7 +149,7 @@ internal object ConfigGuard {
                 // Absent means the core's default. Pin it so the log always names what ran.
                 inbound.put("stack", PREFERRED_STACK)
             } else if (stack != PREFERRED_STACK) {
-                Log.w(
+                NexusLog.w(
                     TAG,
                     "tun stack is \"$stack\", not \"$PREFERRED_STACK\" (ADR-0001 §5.4). " +
                         "gvisor reassembles TCP in userspace and costs CPU per packet, which is " +
@@ -161,7 +160,7 @@ internal object ConfigGuard {
             // ADR-0001 §5.4: process_name / find_process routing is a documented CPU sink
             // (SagerNet/sing-box#3934) because it forces an owner lookup per connection.
             if (inbound.optBoolean("auto_redirect", false)) {
-                Log.w(TAG, "auto_redirect enabled — verify against bench/B-04 before shipping")
+                NexusLog.w(TAG, "auto_redirect enabled — verify against bench/B-04 before shipping")
             }
         }
     }
@@ -211,7 +210,7 @@ internal object ConfigGuard {
             if (address == null) {
                 // Leave the hostname in place: the core may still manage it, and failing the
                 // whole connect because one lookup missed would be worse than trying.
-                Log.w(TAG, "could not resolve $host; leaving the hostname for the core")
+                NexusLog.w(TAG, "could not resolve $host; leaving the hostname for the core")
                 continue
             }
 
@@ -226,7 +225,7 @@ internal object ConfigGuard {
             assertUsableAddress(host, address)
 
             outbound.put("server", address.hostAddress)
-            Log.i(TAG, "resolved $host -> ${address.hostAddress}")
+            NexusLog.d(TAG) { "resolved $host -> ${address.hostAddress}" }
             count++
         }
         return count
@@ -301,11 +300,11 @@ internal object ConfigGuard {
             val outbound = outbounds.optJSONObject(i) ?: continue
             if (outbound.optString("tag") != "proxy") continue
             runCatching {
-                Log.i(TAG, "proxy outbound: ${redact(JSONObject(outbound.toString()))}")
-            }.onFailure { Log.w(TAG, "could not describe the proxy outbound: ${it.message}") }
+                NexusLog.d(TAG) { "proxy outbound: ${redact(JSONObject(outbound.toString()))}" }
+            }.onFailure { NexusLog.w(TAG, "could not describe the proxy outbound: ${it.message}") }
             return
         }
-        Log.w(TAG, "no outbound tagged \"proxy\" - the route final has nothing to point at")
+        NexusLog.w(TAG, "no outbound tagged \"proxy\" - the route final has nothing to point at")
     }
 
     /** Recursively replace credential-bearing values with a placeholder, in place. */

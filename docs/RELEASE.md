@@ -25,12 +25,12 @@ any appear, stop and fix `.gitignore` first.
 git add .
 git commit -m "Nexus v1.0.0"
 git branch -M main
-git remote add origin git@github.com:OWNER/REPO.git
+git remote add origin git@github.com:similook/nexus.git
 git push -u origin main
 ```
 
-Then replace `OWNER/REPO` in `.github/ISSUE_TEMPLATE/config.yml` with the real path, or those
-two links 404.
+The links in `.github/ISSUE_TEMPLATE/config.yml` already point at `similook/nexus`. If the
+repository is ever renamed or transferred, they need updating with it.
 
 ---
 

@@ -134,6 +134,48 @@
             </intent-filter>
         </receiver>
 
+        <!--
+          Handles the notification's Disconnect action.
+
+          A receiver rather than a service PendingIntent: from Android 12 a background service
+          start is refused, so tapping Disconnect did nothing once the app had been swiped
+          away. Broadcasts are not restricted that way.
+
+          process=":core" keeps it in the tunnel's own process, so stopping a tunnel does not
+          resurrect the UI process to do it. exported="false" because nothing outside this app
+          has any business stopping the user's VPN.
+        -->
+        <!--
+          Quick Settings tile.
+
+          process=":core" is load-bearing, not tidiness: the tile reads NexusVpnService's
+          static state and calls its teardown directly, and both only work inside the process
+          the service actually runs in.
+
+          exported="true" is required - the system binds it. BIND_QUICK_SETTINGS_TILE is what
+          stops anything else from doing so.
+        -->
+        <service
+            android:name="io.nexus.plugin.NexusTileService"
+            android:process=":core"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_nexus"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="io.nexus.plugin.NexusStopReceiver"
+            android:process=":core"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="io.nexus.plugin.DISCONNECT" />
+            </intent-filter>
+        </receiver>
+
         <!-- NO manifest receiver for ACTION_SCREEN_ON/OFF: the platform refuses to deliver
              those to manifest receivers by design, precisely so sleeping apps are not woken.
              PowerReceiver registers at runtime from inside the service. -->

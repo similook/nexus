@@ -33,7 +33,8 @@ The part after `?` is what actually helps — that is where transport and securi
 
 ## The node
 
-Fill in what you know. If you are not sure, the `proxy outbound:` log line below has all of it.
+Fill in what you know. If you built the app yourself, the `proxy outbound:` log line below
+has all of it — on a release build from the Releases page it is not printed, by design.
 
 | | |
 |---|---|
@@ -66,18 +67,30 @@ down", and it usually takes a minute.
 
 Two are useful, and they are different.
 
-**1. The app's own log** — Logs tab in the app, or:
+**1. The Logs tab in the app.** Start here — it is the core's own output, it is the same on a
+release build as on a debug one, and it needs no computer. Copy from there.
+
+If you have a cable and want the surrounding Android detail too:
 
 ```bash
 adb logcat -c; adb logcat -v threadtime NexusVpn:V NexusPlugin:V NexusConfigGuard:V GoLog:V *:S
 ```
 
-The single most useful line is this one, which shows exactly what is handed to the core.
-The UUID is already masked as `***`:
+<details>
+<summary>If you built the app yourself, one more line is worth having</summary>
+
+A debug build prints exactly what is handed to the core, with the UUID already masked as `***`:
 
 ```
 NexusConfigGuard: proxy outbound: {"type":"vless","tag":"proxy",...}
 ```
+
+**Release builds do not print it.** That line names your server, its SNI and its transport, and
+logcat is readable by anything on the device holding `READ_LOGS` — so it, along with the other
+per-step detail, is compiled out of the builds on the Releases page. Nothing is missing from the
+Logs tab as a result; only from `adb logcat`.
+
+</details>
 
 **2. A crash, if the app closed by itself:**
 

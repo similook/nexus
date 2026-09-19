@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
@@ -82,7 +81,7 @@ internal class TunnelNotification(context: Context) {
         } catch (e: Exception) {
             // A notification that cannot even be built is fatal for a foreground service, and
             // the exception text is the only clue anyone will get.
-            Log.e(TAG, "notification build failed", e)
+            NexusLog.e(TAG, "notification build failed", e)
             return false
         }
 
@@ -99,14 +98,14 @@ internal class TunnelNotification(context: Context) {
         for ((name, type) in types) {
             try {
                 ServiceCompat.startForeground(service, NOTIFICATION_ID, notification, type)
-                Log.i(TAG, "foreground service started (type=$name)")
+                NexusLog.i(TAG, "foreground service started (type=$name)")
                 return true
             } catch (e: Exception) {
-                Log.w(TAG, "startForeground(type=$name) refused: ${e.javaClass.simpleName}: ${e.message}")
+                NexusLog.w(TAG, "startForeground(type=$name) refused: ${e.javaClass.simpleName}: ${e.message}")
             }
         }
 
-        Log.e(TAG, "every startForeground strategy was refused — the OS will kill this service")
+        NexusLog.e(TAG, "every startForeground strategy was refused — the OS will kill this service")
         return false
     }
 
@@ -122,6 +121,17 @@ internal class TunnelNotification(context: Context) {
         update(build(STATE_CONNECTED, serverLabel))
 
     fun showError(message: String) = update(build(STATE_ERROR, message))
+
+    /**
+     * Leave the foreground but keep the notification on screen.
+     *
+     * Used on a failed start. STOP_FOREGROUND_REMOVE would take the error message away with
+     * the service, and the user would be left with a VPN that stopped for no stated reason -
+     * the notification is the only place they will ever see "initialize cache-file: timeout".
+     */
+    fun detachForeground(service: Service) {
+        ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_DETACH)
+    }
 
     fun stopForeground(service: Service) {
         ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -163,11 +173,19 @@ internal class TunnelNotification(context: Context) {
             NotificationCompat.Action(
                 0,
                 "Disconnect",
-                PendingIntent.getService(
+                // getBroadcast, NOT getService. From Android 12 a service cannot be started
+                // from the background, and a notification tap with no live activity is a
+                // background start - so this action silently did nothing once the user had
+                // swiped the app away, which is precisely when they need it. See
+                // NexusStopReceiver.
+                PendingIntent.getBroadcast(
                     appContext,
                     REQUEST_STOP,
-                    Intent(appContext, NexusVpnService::class.java)
-                        .setAction(NexusVpnService.ACTION_STOP),
+                    Intent(appContext, NexusStopReceiver::class.java)
+                        .setAction(NexusStopReceiver.ACTION_DISCONNECT)
+                        // Explicit package: an implicit broadcast with a custom action would
+                        // be delivered nowhere on modern Android.
+                        .setPackage(appContext.packageName),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 ),
             )

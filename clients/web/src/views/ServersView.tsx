@@ -212,7 +212,17 @@ export function ServersView({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold text-white tracking-tight">Server Nodes</h2>
-            <span className="px-2 py-0.5 rounded-full bg-brand-surface-card border border-brand-border text-[11px] font-mono text-brand-orange font-semibold">
+            {/*
+              inline-flex + items-center, not a bare span.
+              A span is inline, so its box is sized by the font's line box rather than its
+              content - the pill ends up taller than the glyphs and the text sits high inside
+              it. That is worse here than usual because the number is `font-mono` and the word
+              is not: two fonts with different metrics sharing one inline baseline.
+
+              leading-none hands vertical centring to the flex container instead of the line
+              height, and the symmetric px/py then actually centre what is inside.
+            */}
+            <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-full bg-brand-surface-card border border-brand-border text-[11px] font-mono leading-none text-brand-orange font-semibold">
               {totalNodes} Configs
             </span>
           </div>

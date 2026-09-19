@@ -36,10 +36,38 @@ Peak RSS of the Apple Network Extension process under a 1 h mixed-traffic soak, 
 headroom. Record GC cycle frequency alongside — ADR-0001 §5.3 is a trade, and we need both
 numbers to make it.
 
-## B-04 — TUN stack CPU
+## B-04 — TUN stack CPU  ·  [harness](B-04/) · **runnable**
 
-CPU-seconds per GB transferred: `system` vs `mixed` vs `gvisor`, Android and desktop.
-Validates the §5.4 policy.
+CPU-seconds per GB transferred: `system` vs `mixed` vs `gvisor`. Validates the §5.4 policy —
+which the shipped build currently **overrides**, on correctness grounds, without a measurement.
+
+This is the only bench with a harness written. See [B-04/README.md](B-04/README.md) for
+methodology and the caveats that matter; the short version:
+
+- `/sys/class/power_supply/battery/current_now` is SELinux-blocked on retail devices, so energy
+  comes from the coulomb counter in `dumpsys battery` (5 mAh steps — long arms only).
+- `batterystats` per-UID mAh is **modelled from a vendor power profile**, not measured. It can
+  be cited as an estimate and nothing more.
+- The primary metric is therefore core-process CPU seconds per GB through `tun0`: per-process,
+  10 ms resolution, and immune to display and radio power.
+- There is deliberately **no `system` load arm** — `system` does not carry TCP on this setup,
+  which is the defect that forced gVisor. Its load comparison is against `mixed`.
+
+```bash
+cd bench/B-04
+./b04.sh doctor          # what your device can and cannot measure
+./b04.sh arm gvisor-idle 30
+./b04.sh report
+```
+
+### Results
+
+**None yet.** Until this table has rows, the root README's battery statement stays a design
+argument and says so, and no figure anywhere in the repo may cite B-04.
+
+| Date | Device / OS | Build | Arm | Repeats | CPU s/GB (median) | mA idle (median) | Spread |
+|---|---|---|---|---|---|---|---|
+| — | — | — | — | — | — | — | — |
 
 ## B-05 — Throughput parity
 

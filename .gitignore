@@ -6,6 +6,9 @@
 keystore.properties
 *.jks
 *.keystore
+# The release keystore on this machine is named `ramzapp`, with no extension, so none
+# of the patterns above would catch it if it were ever copied into the tree.
+ramzapp*
 
 # ─── Dependencies and build output ───────────────────────────────────────────────────────
 node_modules/

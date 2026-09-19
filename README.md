@@ -55,6 +55,17 @@ Every one of these is checked on every build against sing-box's own validator �
 - **Real proxied latency** (`Live`) asks the core itself, which is the only test that proves
   your credentials work rather than just that the host answers.
 
+### Getting at it quickly
+
+- **Quick Settings tile.** Connect and disconnect from the notification shade without opening
+  the app. It replays the last config you connected with — the tile cannot see the server
+  highlighted in the app, because that lives in the WebView's storage.
+- **Disconnect from the notification works with the app closed.** "Disconnect" on a VPN has to
+  work when the UI has been killed, which is exactly when you are least able to do anything
+  about it if it does not.
+- **Your selection and your session survive.** The chosen server persists across a restart, and
+  the connected timer keeps counting through a minimise rather than restarting from zero.
+
 ### Editing and sharing
 
 - Per-node details showing address, port, protocol, transport, SNI, ALPN, security mode,
@@ -105,6 +116,12 @@ silently bypasses the tunnel is a deanonymisation.
 `android:allowBackup="false"`, plus explicit exclusion rules for cloud backup **and**
 device-to-device transfer. Your subscription URL and UUIDs are bearer credentials; with backup
 enabled, `adb backup` extracts them with no root.
+
+One thing is written to native storage: the **last config you actually connected with**, so the
+Quick Settings tile can start it without opening the app. It lives in app-private
+`SharedPreferences`, covered by the same `allowBackup="false"`, and it is replaced on each
+successful connect rather than accumulating a history. Nothing else about your subscriptions
+leaves the WebView's own storage.
 
 ### No telemetry
 
@@ -184,8 +201,9 @@ Some deliberate decisions worth knowing about:
 - **gVisor TUN stack**, overriding [ADR-0001](docs/adr/ADR-0001-core-engine-selection.md) §5.4.
   The `system` stack carried UDP and silently dropped TCP on device — a browser sat there
   loading nothing while QUIC flowed. A stack that drops TCP is a broken tunnel, not a battery
-  trade-off. **The CPU cost of this is not yet measured**; it is owed a `bench/B-04` run and the
-  `mixed` stack should be tried.
+  trade-off. **The CPU cost of this is not yet measured** — [`bench/B-04`](bench/B-04/) is the
+  harness that will settle it, and `mixed` (kernel TCP, gVisor UDP) is the alternative it
+  compares against.
 - **Process-based routing rules are disabled** (ADR-0001 §5.4) — a documented per-connection CPU
   sink upstream.
 - **No live throughput in the notification.** Updating it once a second is a binder transaction
@@ -245,11 +263,42 @@ Stated plainly, because finding these out after installing is worse:
 - **v2ray `headerType` obfuscation** other than `http` (srtp, utp, wechat-video, dtls) has no
   sing-box equivalent; those nodes are refused at import with a reason rather than imported
   broken.
-- **gVisor's CPU cost is unmeasured.** The battery thesis this project is built on is a design
-  argument, not yet a benchmark result. No power figure is claimed anywhere in this repo that
-  is not backed by a run in `bench/`, and right now there are none for the shipped stack.
+- **gVisor's CPU cost is not yet measured.** The battery thesis this project is built on is a
+  design argument, not yet a benchmark result. The harness to settle it exists and is runnable
+  ([`bench/B-04`](bench/B-04/)); the results table there is empty. No power figure is claimed
+  anywhere in this repo that is not backed by a run in `bench/`, and right now there are none
+  for the shipped stack.
 - **No split tunnelling UI.** The per-app allow/deny plumbing exists in `NexusVpnService` but
   nothing exposes it.
+
+---
+
+## Changelog
+
+### v1.1.0
+
+- **Quick Settings tile.** Connect and disconnect from the notification shade without opening
+  the app. It replays the last config you connected with — not the server currently highlighted
+  in the app, which would mean writing credentials to native storage on every scroll.
+- **Disconnect from the notification now works with the app closed.** The action was a
+  `PendingIntent.getService`, and from Android 12 a service start from the shade with no live
+  activity is refused as a background start. The tap did nothing, silently, with the tunnel
+  still up. It is a broadcast to a receiver in the core process now, which nothing restricts.
+- **Switching servers while connected no longer deadlocks.** The new core opened `cache.db`
+  while the old one still held the bbolt flock and died on `initialize cache-file: timeout`,
+  leaving a tunnel with no core behind it. The swap is serialised, tries a reload first, and
+  falls back to a full restart.
+- **Your selected server survives a restart.** Auto-selected nodes were never persisted, so a
+  user who had never opened the Servers tab got a fresh lowest-ping pick every launch — which
+  looked exactly like "it reset to the first server".
+- **Release builds no longer log which server you connect to.** The lines naming the proxy
+  host, SNI and transport are debug-only now; see [Security and privacy](#security-and-privacy).
+  The in-app Logs tab is unchanged and still shows the core's own output.
+- Servers tab count badge is centred.
+
+### v1.0.0
+
+First public release — [v1.0.0](https://github.com/similook/Nexus/releases/tag/v1.0.0).
 
 ---
 

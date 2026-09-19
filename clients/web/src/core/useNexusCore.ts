@@ -393,12 +393,24 @@ export function useNexusCore(): NexusApi {
    */
   const switchTo = useCallback(
     async (config: string, name?: string) => {
-      // disconnect() and connect() each guard on transitionRef and return early if one is in
-      // flight, so they cannot be called back to back without waiting for the first to clear.
-      await disconnect();
+      // ONE start, no stop first.
+      //
+      // This used to stop and then start, which looked like the safe ordering and was not.
+      // libbox always enables sing-box's cache file, and bbolt opens it with an exclusive
+      // flock and a one-second timeout. Two service lifecycles racing over that file produced
+      //
+      //     start or reload service: initialize cache-file: timeout
+      //
+      // with the outgoing tun interface still open - the UI showed disconnected while the
+      // system VPN key stayed lit.
+      //
+      // The swap is now atomic on the native side: NexusVpnService receives a second
+      // ACTION_START, closes the running core and its tun fd, and opens the new one, all
+      // serialised on one executor inside a single service instance. From here it is just a
+      // connect.
       await connect(config, name);
     },
-    [connect, disconnect],
+    [connect],
   );
 
   const toggle = useCallback(

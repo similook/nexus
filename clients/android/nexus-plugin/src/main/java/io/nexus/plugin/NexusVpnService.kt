@@ -9,7 +9,6 @@ import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.util.Log
 import io.nexus.libbox.TunOptions
 import io.nexus.nexuscore.Nexuscore
 import io.nexus.nexuscore.Service as NexusService
@@ -48,6 +47,9 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         Thread(r, "nexus-start").apply { isDaemon = true }
     }
     private var tunFd: ParcelFileDescriptor? = null
+
+    /** Guards against a double teardown - requestStop() can race onDestroy(). */
+    private val stopping = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var notification: TunnelNotification
 
     private val powerReceiver = PowerReceiver(
@@ -73,6 +75,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         notification = TunnelNotification(this)
         DefaultNetworkMonitor.attach(this)
 
@@ -86,7 +89,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                 getExternalFilesDir(null)?.absolutePath ?: filesDir.absolutePath,
                 cacheDir.absolutePath,
             )
-        }.onFailure { Log.e(TAG, "libbox setup failed", it) }
+        }.onFailure { NexusLog.e(TAG, "libbox setup failed", it) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -97,9 +100,9 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         return try {
             handleCommand(intent)
         } catch (e: Throwable) {
-            Log.e(TAG, "onStartCommand failed", e)
+            NexusLog.e(TAG, "onStartCommand failed", e)
             runCatching { notification.showError(e.message ?: e.javaClass.simpleName) }
-            stop()
+            stop("onStartCommand-failure")
             START_NOT_STICKY
         }
     }
@@ -109,7 +112,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
             ACTION_START -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG)
                 if (config.isNullOrBlank()) {
-                    Log.e(TAG, "start without config")
+                    NexusLog.e(TAG, "start without config")
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -117,7 +120,9 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
             }
 
             ACTION_STOP -> {
-                stop()
+                // requestStop, not stop: this runs on the main thread and the teardown may
+                // block on a JNI close.
+                requestStop("ACTION_STOP")
                 return START_NOT_STICKY
             }
 
@@ -138,7 +143,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                     val guarded = try {
                         ConfigGuard.enforce(config)
                     } catch (e: Exception) {
-                        Log.e(TAG, "reload config rejected", e)
+                        NexusLog.e(TAG, "reload config rejected", e)
                         notification.showError(e.message ?: "invalid configuration")
                         return START_STICKY
                     }
@@ -148,7 +153,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                         // it, or the shade keeps naming the server the user just left.
                         notification.showConnected(serverLabel(nodeName, guarded))
                     } catch (e: Exception) {
-                        Log.e(TAG, "reload failed", e)
+                        NexusLog.e(TAG, "reload failed", e)
                         notification.showError(e.message ?: "reload failed")
                     }
                 }
@@ -168,7 +173,22 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
     }
 
     private fun start(config: String, nodeName: String? = null) {
-        if (service.get() != null) return
+        // NO EARLY RETURN WHEN A CORE IS ALREADY RUNNING.
+        //
+        // A second ACTION_START is how a node switch arrives, and bailing out here is what
+        // forced the UI to stop the service first and then start it again. That produced a
+        // race the core cannot survive: libbox ALWAYS enables the cache file (box.go sets
+        // needCacheFile whenever a PlatformLogWriter is present, which libbox always
+        // provides), and bbolt opens it with an exclusive flock and a one second timeout.
+        // If the outgoing instance has not released that lock, the incoming one dies with
+        //
+        //     start or reload service: initialize cache-file: timeout
+        //
+        // leaving the old tun interface open - the UI says disconnected while the system VPN
+        // key stays lit. A zombie.
+        //
+        // The swap now happens INSIDE one service instance, serialised on `starter`, so the
+        // old core is fully closed before the new one opens the same file.
 
         // Foreground BEFORE establishing the tunnel: Android gives us a few seconds after
         // startForegroundService() to call startForeground(), and blowing that deadline is its
@@ -177,48 +197,170 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         // If every strategy was refused there is no point continuing — the OS will kill this
         // service regardless, and dying quietly with a log beats dying in a crash dialog.
         if (!notification.startForeground(this)) {
-            Log.e(TAG, "could not enter foreground; aborting start")
+            NexusLog.e(TAG, "could not enter foreground; aborting start")
             stopSelf()
             return
         }
 
         // Everything below touches the network (config pre-resolution) or takes seconds
-        // (core start), so it leaves the main thread here.
+        // (core start), so it leaves the main thread here. `starter` is single-threaded, which
+        // is what makes a swap strictly sequential: a queued start cannot begin until the
+        // close that precedes it has returned.
         starter.execute { startCore(config, nodeName) }
     }
 
+    /**
+     * Release the core and the tun interface, in that order, and wait for the file lock.
+     *
+     * MUST be called on [starter]. Closing the core closes its cache file, which is what frees
+     * the bbolt flock the next instance needs; doing it anywhere else reintroduces the race
+     * this exists to remove.
+     */
+    private fun closeCore() {
+        service.getAndSet(null)?.let { existing ->
+            NexusLog.d(TAG) { "closing previous core instance" }
+            runCatching { existing.close() }
+                .onFailure { NexusLog.w(TAG, "core close failed: ${it.message}") }
+        }
+        // The tun fd is closed AFTER the core, not before: the core is still reading from it
+        // while it shuts down, and pulling the descriptor first turns an orderly close into a
+        // stream of read errors.
+        tunFd?.let { runCatching { it.close() } }
+        tunFd = null
+    }
+
+    /**
+     * Give up on a start, leaving nothing behind.
+     *
+     * Every failure path goes through here. The important part is that the tun interface is
+     * closed even when the failure happened before it was opened - the system VPN key tracks
+     * the interface, not the notification, so a start that dies with a descriptor still open
+     * leaves the key lit over a tunnel that carries nothing.
+     *
+     * STOP_FOREGROUND_DETACH rather than REMOVE: the notification is the only place the user
+     * will ever see why it failed, and removing it along with the service would leave them
+     * with a VPN that simply stopped for no stated reason.
+     */
+    private fun failStart(message: String) {
+        NexusLog.e(TAG, "start failed: $message")
+        closeCore()
+        runCatching { notification.showError(message) }
+        runCatching { notification.detachForeground(this) }
+        stopSelf()
+    }
+
     private fun startCore(config: String, nodeName: String? = null) {
+        /*
+         * A SWAP IS A RELOAD, NOT A CLOSE FOLLOWED BY A START.
+         *
+         * Serialising close-then-create on `starter` was not enough, and the reason is in
+         * sing-box rather than in Kotlin. Destroying the Service destroys its CommandServer
+         * too, and building a new one means a new box opening the same cache.db - so the new
+         * bbolt handle races the old one's release, with a one second timeout to lose in.
+         *
+         * StartOrReloadService does the same swap in Go, correctly:
+         *
+         *     s.lifecycleAccess.Lock()
+         *     oldInstance.Close()          // completes
+         *     runtimeDebug.FreeOSMemory()
+         *     s.newInstance(...)           // only then
+         *
+         * One lifecycle lock, one CommandServer, one cache file, no race to win. Reloading is
+         * also what the core is designed for - the fd, the notification and the status stream
+         * all stay up, so the user sees a reconnect instead of the tunnel disappearing.
+         *
+         * Falling back to a full restart if reload fails, because a failed reload leaves the
+         * old instance closed and nothing running.
+         */
+        val running = service.get()
+        if (running != null) {
+            val guardedForReload = try {
+                ConfigGuard.enforce(config)
+            } catch (e: Exception) {
+                failStart(e.message ?: "invalid configuration")
+                return
+            }
+
+            try {
+                running.reload(guardedForReload)
+                notification.showConnected(serverLabel(nodeName, guardedForReload))
+                rememberForRelaunch(guardedForReload, nodeName)
+                NexusLog.i(TAG, "swapped config via reload")
+                return
+            } catch (e: Exception) {
+                NexusLog.w(TAG, "reload failed, falling back to a full restart: ${e.message}")
+                // Fall through. closeCore() below tears down whatever state the failed reload
+                // left, and the retry loop covers the lock it may still be holding.
+            }
+        }
+
+        // Serialised on `starter`, so this returns before any queued start proceeds.
+        closeCore()
+
         // ADR-0001 §5.4 is a product decision, so it gets enforced in code rather than left
         // to whoever edits a config template. See ConfigGuard.
         val guarded = try {
             ConfigGuard.enforce(config)
         } catch (e: Exception) {
-            Log.e(TAG, "config rejected", e)
-            notification.showError(e.message ?: "invalid configuration")
-            stopSelf()
+            failStart(e.message ?: "invalid configuration")
             return
         }
 
-        val created = try {
-            Nexuscore.newService(guarded, this)
-        } catch (e: Exception) {
-            Log.e(TAG, "core init failed", e)
-            notification.showError(e.message ?: "core failed to start")
-            stopSelf()
-            return
+        /*
+         * RETRY, BUT ONLY FOR THE CACHE LOCK.
+         *
+         * closeCore() above already released it, so in the ordinary case the first attempt
+         * succeeds and this loop costs nothing. It exists for the cases ordering alone cannot
+         * cover: the OS has not finished releasing an flock held by a process it is still
+         * reaping, or a previous run was killed hard enough that onDestroy never ran.
+         *
+         * bbolt's own timeout is one second, so three attempts spaced 400 ms apart bound the
+         * worst case at a few seconds rather than an immediate, permanent failure.
+         *
+         * Deliberately narrow: only "cache-file" AND "timeout" retries. A bad UUID or an
+         * unreachable server must fail on the first attempt and say so, not sit in a retry
+         * loop making the user think the app has hung.
+         */
+        var created: NexusService? = null
+        var lastError: Exception? = null
+
+        for (attempt in 1..CACHE_LOCK_ATTEMPTS) {
+            try {
+                val instance = Nexuscore.newService(guarded, this)
+                try {
+                    instance.start()
+                    created = instance
+                    break
+                } catch (e: Exception) {
+                    runCatching { instance.close() }
+                    throw e
+                }
+            } catch (e: Exception) {
+                lastError = e
+                val message = e.message ?: ""
+                val isCacheLock = message.contains("cache-file", true) && message.contains("timeout", true)
+                if (!isCacheLock || attempt == CACHE_LOCK_ATTEMPTS) break
+
+                NexusLog.w(TAG, "cache file still locked (attempt $attempt/$CACHE_LOCK_ATTEMPTS); retrying")
+                try {
+                    Thread.sleep(CACHE_LOCK_BACKOFF_MS)
+                } catch (interrupted: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
         }
 
-        try {
-            created.start()
-        } catch (e: Exception) {
-            Log.e(TAG, "core start failed", e)
-            runCatching { created.close() }
-            notification.showError(e.message ?: "core failed to start")
-            stopSelf()
+        if (created == null) {
+            failStart(lastError?.message ?: "core failed to start")
             return
         }
 
         service.set(created)
+        stopping.set(false)
+        isRunning = true
+        rememberForRelaunch(guarded, nodeName)
+        notifyTileStateChanged()
 
         // Register AFTER the core exists — PowerReceiver.register() seeds the initial screen
         // and Doze state immediately, and that seed has to land on a live service. Starting
@@ -260,33 +402,151 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         }.getOrNull()
     }
 
-    private fun stop() {
+    /**
+     * Remember what to start if something outside the UI asks for a tunnel.
+     *
+     * The Quick Settings tile runs in Kotlin and cannot see the selected server - that lives in
+     * the WebView's localStorage. So the service records what it actually started, and the tile
+     * replays it.
+     *
+     * The GUARDED config is stored, not the one handed in: it is what genuinely worked, already
+     * through ConfigGuard.
+     *
+     * Written only after a successful start, so a config that failed is never replayed.
+     *
+     * PRIVACY: this puts a proxy URI - and therefore a UUID or password - into app-private
+     * SharedPreferences. Same exposure class as the copy already in localStorage, and covered
+     * by android:allowBackup="false" plus the data-extraction rules, so `adb backup` cannot
+     * reach either.
+     *
+     * Reuses BootReceiver's store rather than opening a second one. Note that writing
+     * KEY_LAST_CONFIG does NOT switch on reconnect-after-boot: BootReceiver is gated on
+     * KEY_AUTO_CONNECT, which nothing sets.
+     */
+    private fun rememberForRelaunch(guardedConfig: String, nodeName: String?) {
+        runCatching {
+            BootReceiver.preferences(this).edit()
+                .putString(BootReceiver.KEY_LAST_CONFIG, guardedConfig)
+                .putString(BootReceiver.KEY_LAST_NAME, nodeName ?: "")
+                .apply()
+        }.onFailure { NexusLog.w(TAG, "could not remember the config: ${it.message}") }
+    }
+
+    /**
+     * Ask the system to re-read the tile's state.
+     *
+     * Called on every transition, wherever it came from - the app, the notification, or the
+     * tile itself - so the tile never shows a state the tunnel is not in.
+     *
+     * requestListeningState is a no-op below API 24 and when the tile is not added, so it needs
+     * no guard beyond the version check.
+     */
+    private fun notifyTileStateChanged() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.N) return
+        runCatching {
+            android.service.quicksettings.TileService.requestListeningState(
+                this,
+                android.content.ComponentName(this, NexusTileService::class.java),
+            )
+        }
+    }
+
+    /**
+     * Tear the tunnel down. Safe to call from any thread and from anywhere.
+     *
+     * THE PUBLIC ENTRY POINT, used by the notification's Disconnect action and by the Quick
+     * Settings tile. Both of those run when the app's UI does not exist, so neither can go
+     * through the plugin or the WebView.
+     *
+     * The work is posted to [starter] rather than done inline. onDestroy() runs on the main
+     * thread, and closing the core is a synchronous JNI call into Go that tears down the whole
+     * box - blocking the main thread on it is an ANR, and an ANR during teardown is precisely
+     * the "tapped Disconnect, nothing happened, VPN key still lit" symptom.
+     */
+    fun requestStop(source: String = "external") {
+        NexusLog.i(TAG, "stop: requested (source=$source)")
+        runCatching { starter.execute { stop(source) } }
+            .onFailure {
+                // Executor already shut down. Do it inline rather than not at all.
+                NexusLog.w(TAG, "stop: executor unavailable, tearing down inline")
+                stop(source)
+            }
+    }
+
+    /**
+     * @param source for the log only; teardown is identical whoever asked.
+     */
+    private fun stop(source: String) {
+        if (!stopping.compareAndSet(false, true)) {
+            NexusLog.d(TAG) { "stop: already in progress (source=$source)" }
+            return
+        }
+
+        isRunning = false
+        notifyTileStateChanged()
+
         powerReceiver.unregister(this)
         unregisterNetworkCallback()
         DefaultNetworkMonitor.stop()
 
-        service.getAndSet(null)?.let { runCatching { it.close() } }
+        /*
+         * TUN FIRST, CORE SECOND - the OPPOSITE of closeCore(), deliberately.
+         *
+         * closeCore() serves a SWAP, where the core keeps running and closing the descriptor
+         * out from under it turns an orderly handover into a stream of read errors.
+         *
+         * This is a FINAL stop. There is nothing to hand over, and the ordering matters for a
+         * different reason: the interface is created with setBlocking(true) (a battery
+         * decision - see openTun), so the core's reader is parked in a blocking read on this
+         * descriptor. Closing the core first means waiting for a goroutine that is waiting for
+         * us. Closing the fd first unblocks it.
+         *
+         * Closing the fd is also what removes the system VPN key, so doing it first means the
+         * user sees the tunnel go away immediately rather than after the core has finished.
+         */
         tunFd?.let { runCatching { it.close() } }
         tunFd = null
+        NexusLog.d(TAG) { "stop: tun closed" }
+
+        /*
+         * Bounded. A leaked Go object is strictly better than a tunnel that will not die: the
+         * process is going away anyway, and the alternative is hanging here forever with the
+         * interface already gone and the notification still up.
+         */
+        val core = service.getAndSet(null)
+        if (core != null) {
+            val startedAt = System.currentTimeMillis()
+            val closer = Thread({ runCatching { core.close() } }, "nexus-core-close")
+            closer.isDaemon = true
+            closer.start()
+            closer.join(CORE_CLOSE_TIMEOUT_MS)
+            if (closer.isAlive) {
+                NexusLog.e(TAG, "stop: core close TIMED OUT after ${CORE_CLOSE_TIMEOUT_MS}ms; continuing")
+            } else {
+                NexusLog.d(TAG) { "stop: core closed in ${System.currentTimeMillis() - startedAt}ms" }
+            }
+        }
 
         notification.stopForeground(this)
+        NexusLog.i(TAG, "stop: foreground removed")
         stopSelf()
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
-        Log.w(TAG, "system reported low memory")
+        NexusLog.w(TAG, "system reported low memory")
     }
 
     override fun onRevoke() {
         // Another VPN app took over, or the user revoked consent in Settings.
-        Log.i(TAG, "VPN consent revoked")
-        stop()
+        NexusLog.i(TAG, "VPN consent revoked")
+        stop("onRevoke")
         super.onRevoke()
     }
 
     override fun onDestroy() {
-        stop()
+        stop("onDestroy")
+        instance = null
         super.onDestroy()
     }
 
@@ -328,18 +588,18 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         // the try/catch around onStartCommand cannot see anything that happens here, and a
         // failure surfaces as a native abort with no Java stack trace. These lines are the only
         // way to tell how far we got. Remove them once the connect path is stable.
-        Log.i(TAG, "openTun: begin")
+        NexusLog.d(TAG) { "openTun: begin" }
         val builder = Builder()
             .setSession(SESSION_NAME)
             .setMtu(options.getMTU())
-        Log.i(TAG, "openTun: mtu=${options.getMTU()} autoRoute=${options.getAutoRoute()} strict=${options.getStrictRoute()}")
+        NexusLog.d(TAG) { "openTun: mtu=${options.getMTU()} autoRoute=${options.getAutoRoute()} strict=${options.getStrictRoute()}" }
 
         var inet4Addresses = 0
         var inet6Addresses = 0
         options.getInet4Address().use { while (it.hasNext()) { val p = it.next(); builder.addAddress(p.address(), p.prefix()); inet4Addresses++ } }
         options.getInet6Address().use { while (it.hasNext()) { val p = it.next(); builder.addAddress(p.address(), p.prefix()); inet6Addresses++ } }
         val addressCount = inet4Addresses + inet6Addresses
-        Log.i(TAG, "openTun: $addressCount address(es) (v4=$inet4Addresses v6=$inet6Addresses)")
+        NexusLog.d(TAG) { "openTun: $addressCount address(es) (v4=$inet4Addresses v6=$inet6Addresses)" }
 
         // VpnService.establish() returns null if the interface has no address, and Android
         // gives no other warning. A config whose tun inbound omits `address` therefore fails
@@ -384,7 +644,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                 var matchCount = 0
                 options.getHTTPProxyMatchDomain().use { while (it.hasNext()) { it.next(); matchCount++ } }
                 if (matchCount > 0) {
-                    Log.w(TAG, "config sets $matchCount http proxy match domain(s); " +
+                    NexusLog.w(TAG, "config sets $matchCount http proxy match domain(s); " +
                         "Android ProxyInfo supports exclusions only, so these are ignored")
                 }
             }
@@ -399,7 +659,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         // and a continuous stream of them.
         builder.setBlocking(true)
 
-        Log.i(TAG, "openTun: establishing")
+        NexusLog.d(TAG) { "openTun: establishing" }
         val pfd = builder.establish()
             ?: throw IllegalStateException(
                 "VpnService.establish() returned null — consent revoked, another VPN is active, " +
@@ -407,7 +667,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
             )
 
         tunFd = pfd
-        Log.i(TAG, "openTun: established fd=${pfd.fd}")
+        NexusLog.i(TAG, "openTun: established fd=${pfd.fd}")
         return pfd.fd
     }
 
@@ -432,12 +692,12 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                     val address = it.next()
                     runCatching { builder.addDnsServer(address) }
                         .onSuccess { count++ }
-                        .onFailure { e -> Log.w(TAG, "addDnsServer($address): ${e.message}") }
+                        .onFailure { e -> NexusLog.w(TAG, "addDnsServer($address): ${e.message}") }
                 }
             }
             count
         }.getOrElse { e ->
-            Log.w(TAG, "getDNSServerAddress failed: ${e.message}")
+            NexusLog.w(TAG, "getDNSServerAddress failed: ${e.message}")
             0
         }
 
@@ -449,7 +709,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         // compiler reported. gomobile wraps single values in a box precisely so it can carry
         // a Go nil across the binding, so the null-safe call is still required.
         val mode = runCatching { options.getDNSMode()?.value }.getOrNull()
-        Log.i(TAG, "tun dns: $added server(s), mode=${mode ?: "unset"}")
+        NexusLog.d(TAG) { "tun dns: $added server(s), mode=${mode ?: "unset"}" }
     }
 
     /**
@@ -504,7 +764,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
             v6Routes++
         }
 
-        Log.i(TAG, "openTun: routes applied (v4=$v4Routes v6=$v6Routes)")
+        NexusLog.d(TAG) { "openTun: routes applied (v4=$v4Routes v6=$v6Routes)" }
     }
 
     /**
@@ -536,11 +796,11 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                 // Never route our own traffic into our own tunnel.
                 if (pkg == packageName) continue
                 runCatching { builder.addAllowedApplication(pkg); applied++ }
-                    .onFailure { e -> Log.w(TAG, "include $pkg: ${e.message}") }
+                    .onFailure { e -> NexusLog.w(TAG, "include $pkg: ${e.message}") }
             }
-            Log.i(TAG, "openTun: per-app ALLOW list, $applied of ${include.size} package(s)")
+            NexusLog.d(TAG) { "openTun: per-app ALLOW list, $applied of ${include.size} package(s)" }
             if (exclude.isNotEmpty()) {
-                Log.w(TAG, "openTun: ${exclude.size} exclude package(s) ignored - Android " +
+                NexusLog.w(TAG, "openTun: ${exclude.size} exclude package(s) ignored - Android " +
                     "allows an allow-list OR a deny-list, never both")
             }
             return
@@ -550,9 +810,9 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         runCatching { builder.addDisallowedApplication(packageName); denied++ }
         for (pkg in exclude) {
             runCatching { builder.addDisallowedApplication(pkg); denied++ }
-                .onFailure { e -> Log.w(TAG, "exclude $pkg: ${e.message}") }
+                .onFailure { e -> NexusLog.w(TAG, "exclude $pkg: ${e.message}") }
         }
-        Log.i(TAG, "openTun: per-app DENY list, $denied package(s) (all other apps tunnelled)")
+        NexusLog.d(TAG) { "openTun: per-app DENY list, $denied package(s) (all other apps tunnelled)" }
     }
 
     /**
@@ -585,6 +845,40 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         private const val TAG = "NexusVpn"
         private const val SESSION_NAME = "Nexus"
 
+        /**
+         * The live service, for callers in the SAME process.
+         *
+         * NexusStopReceiver and NexusTileService are both declared `android:process=":core"`,
+         * which is what makes this work: they share this process, so they can call teardown
+         * directly instead of going back out through Android's service APIs - where a
+         * background start is refused and stopService() only reaches us via onDestroy() on the
+         * main thread.
+         *
+         * Null whenever the service is not created. Callers must handle that.
+         */
+        @Volatile
+        var instance: NexusVpnService? = null
+            private set
+
+        /**
+         * Is a tunnel up? Read by the Quick Settings tile.
+         *
+         * A plain static works ONLY because the tile shares this process. Declared in the
+         * default process it would always read false, and the tile would show disconnected
+         * over a live tunnel.
+         */
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+
+        /**
+         * How long to wait for the Go core to close before giving up on it.
+         *
+         * Generous, because a clean close releases the cache-file lock the next start needs.
+         * Bounded, because the tunnel must die even if the core will not.
+         */
+        private const val CORE_CLOSE_TIMEOUT_MS = 5_000L
+
         const val ACTION_START = "io.nexus.plugin.START"
         const val ACTION_STOP = "io.nexus.plugin.STOP"
         const val ACTION_RELOAD = "io.nexus.plugin.RELOAD"
@@ -599,6 +893,11 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
          * for it. Deriving one here would mean re-parsing a URI the service never sees.
          */
         const val EXTRA_NODE_NAME = "nodeName"
+
+        // bbolt opens the cache file with a 1s flock timeout. Three attempts, 400 ms apart,
+        // bounds a stale lock at ~2s of retrying instead of a hard failure.
+        private const val CACHE_LOCK_ATTEMPTS = 3
+        private const val CACHE_LOCK_BACKOFF_MS = 400L
         const val EXTRA_FOREGROUND = "foreground"
     }
 }

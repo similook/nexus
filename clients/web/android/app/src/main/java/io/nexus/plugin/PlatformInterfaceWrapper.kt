@@ -8,7 +8,6 @@ import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.system.OsConstants
-import android.util.Log
 import io.nexus.libbox.BridgeOptions
 import io.nexus.libbox.BridgeSession
 import io.nexus.libbox.ConnectionOwner
@@ -70,7 +69,7 @@ internal interface PlatformInterfaceWrapper : PlatformInterface {
      * wrong default on this interface.
      */
     override fun usePlatformAutoDetectInterfaceControl(): Boolean {
-        Log.d(TAG_PLATFORM, "usePlatformAutoDetectInterfaceControl -> true")
+        NexusLog.d(TAG_PLATFORM) { "usePlatformAutoDetectInterfaceControl -> true" }
         return true
     }
 
@@ -133,7 +132,7 @@ internal interface PlatformInterfaceWrapper : PlatformInterface {
     override fun closeNeighborMonitor(listener: NeighborUpdateListener?) = Unit
 
     override fun getInterfaces(): NetworkInterfaceIterator? {
-        Log.d(TAG_PLATFORM, "getInterfaces")
+        NexusLog.d(TAG_PLATFORM) { "getInterfaces" }
         val interfaces = runCatching {
             NetworkInterface.getNetworkInterfaces().asSequence().map { iface ->
                 io.nexus.libbox.NetworkInterface().apply {
@@ -190,7 +189,7 @@ internal interface PlatformInterfaceWrapper : PlatformInterface {
      * Logged so the trace shows whether the core asked for it at all before dying.
      */
     override fun localDNSTransport(): LocalDNSTransport? {
-        Log.d(TAG_PLATFORM, "localDNSTransport -> null")
+        NexusLog.d(TAG_PLATFORM) { "localDNSTransport -> null" }
         return null
     }
 
@@ -234,7 +233,7 @@ internal interface PlatformInterfaceWrapper : PlatformInterface {
     // ===== notifications ===============================================================
 
     override fun sendNotification(notification: io.nexus.libbox.Notification?) {
-        Log.d(TAG_PLATFORM, "core notification: ${notification?.title}")
+        NexusLog.d(TAG_PLATFORM) { "core notification: ${notification?.title}" }
     }
 
     override fun cancelNotification(identifier: String?, type: Int) = Unit
@@ -364,7 +363,7 @@ private fun formatPrefix(address: InetAddress?, prefixLength: Int): String? {
     // A prefix length outside the family's range would also fail to parse.
     val max = if (address is Inet6Address) 128 else 32
     if (prefixLength < 0 || prefixLength > max) {
-        Log.w(TAG_PLATFORM, "dropping $bare: prefix length $prefixLength out of range for /$max")
+        NexusLog.w(TAG_PLATFORM, "dropping $bare: prefix length $prefixLength out of range for /$max")
         return null
     }
 
@@ -459,7 +458,7 @@ internal object DefaultNetworkMonitor {
         callback = cb
 
         runCatching { cm.registerNetworkCallback(request, cb) }
-            .onFailure { Log.w(TAG_NETWORK, "registerNetworkCallback failed", it) }
+            .onFailure { NexusLog.w(TAG_NETWORK, "registerNetworkCallback failed", it) }
 
         // Publish once immediately: callbacks only fire on CHANGES, and the physical network
         // is usually already up by the time the tunnel starts.
@@ -476,7 +475,7 @@ internal object DefaultNetworkMonitor {
     private fun publish(cm: ConnectivityManager, listener: InterfaceUpdateListener) {
         val best = pickUnderlying(cm)
         if (best == null) {
-            Log.i(TAG_NETWORK, "no non-VPN network available")
+            NexusLog.i(TAG_NETWORK, "no non-VPN network available")
             listener.updateDefaultInterface("", -1, false, false)
             return
         }
@@ -497,7 +496,7 @@ internal object DefaultNetworkMonitor {
         // value that looks computed but is not.
         val constrained = false
 
-        Log.i(TAG_NETWORK, "default -> $name (index $index, expensive=$expensive)")
+        NexusLog.d(TAG_NETWORK) { "default -> $name (index $index, expensive=$expensive)" }
         listener.updateDefaultInterface(name, index, expensive, constrained)
     }
 

@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.net.VpnService
-import android.util.Log
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
@@ -192,8 +191,8 @@ class NexusPlugin : Plugin() {
                 context.getExternalFilesDir(null)?.absolutePath ?: context.filesDir.absolutePath,
                 context.cacheDir.absolutePath,
             )
-            Log.i(TAG, "libbox setup (app process), basePath=${context.filesDir.absolutePath}")
-        }.onFailure { Log.e(TAG, "libbox setup failed in app process", it) }
+            NexusLog.d(TAG) { "libbox setup (app process), basePath=${context.filesDir.absolutePath}" }
+        }.onFailure { NexusLog.e(TAG, "libbox setup failed in app process", it) }
     }
 
     @PluginMethod
@@ -253,7 +252,7 @@ class NexusPlugin : Plugin() {
 
         runCatching {
             activity?.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 9501)
-        }.onFailure { Log.w(TAG, "could not request POST_NOTIFICATIONS: ${it.message}") }
+        }.onFailure { NexusLog.w(TAG, "could not request POST_NOTIFICATIONS: ${it.message}") }
     }
 
     private fun launchService(config: String, nodeName: String? = null) {
@@ -357,7 +356,7 @@ class NexusPlugin : Plugin() {
             try {
                 connectPingClient()
                 client.urlTest(PROXY_TAG)
-                Log.i(TAG, "url test dispatched for outbound \"$PROXY_TAG\"")
+                NexusLog.d(TAG) { "url test dispatched for outbound \"$PROXY_TAG\"" }
                 call.resolve()
             } catch (e: Exception) {
                 disconnectPingClient()
@@ -480,7 +479,7 @@ class NexusPlugin : Plugin() {
             io.schedule({
                 runCatching {
                     if (pingClient != null) {
-                        Log.w(TAG, "url test produced no result within ${PING_TIMEOUT_MS}ms")
+                        NexusLog.w(TAG, "url test produced no result within ${PING_TIMEOUT_MS}ms")
                         notifyListeners("proxyDelay", JSObject().put("delayMs", 0).put("ok", false))
                         disconnectPingClient()
                     }
@@ -671,15 +670,16 @@ class NexusPlugin : Plugin() {
             // a blocking RPC. Cached rather than fetched per getStatus() call, because that one
             // is a main-thread bridge crossing.
             coreStartedAt = runCatching { client.startedAt }.getOrElse {
-                Log.d(TAG, "started-at unavailable: ${it.message}")
+                NexusLog.d(TAG) { "started-at unavailable: ${it.message}" }
                 0L
             }
 
-            Log.i(TAG, "status client connected (core started at $coreStartedAt)")
+            NexusLog.i(TAG, "status client connected")
+            NexusLog.d(TAG) { "core started at $coreStartedAt" }
             true
         } catch (e: Exception) {
             // Expected whenever the core is not running — the socket simply is not there.
-            Log.d(TAG, "status client not connected: ${e.message}")
+            NexusLog.d(TAG) { "status client not connected: ${e.message}" }
             false
         }
     }
@@ -710,7 +710,7 @@ class NexusPlugin : Plugin() {
                 return@scheduleWithFixedDelay
             }
             if (attempts.incrementAndGet() >= PROBE_MAX_ATTEMPTS) {
-                Log.w(TAG, "giving up on the command socket after $PROBE_MAX_ATTEMPTS attempts")
+                NexusLog.w(TAG, "giving up on the command socket after $PROBE_MAX_ATTEMPTS attempts")
                 intendedRunning = false
                 // Tell the UI rather than leaving it on "Establishing tunnel" indefinitely.
                 notifyListeners(
@@ -809,13 +809,12 @@ class NexusPlugin : Plugin() {
 
             val tick = statusTicks.incrementAndGet()
             if (tick <= 3 || tick % 30 == 0) {
-                Log.i(
-                    TAG,
+                NexusLog.d(TAG) {
                     "status #$tick up=${message.uplink} down=${message.downlink} " +
                         "upTotal=${message.uplinkTotal} downTotal=${message.downlinkTotal} " +
                         "connIn=${message.connectionsIn} connOut=${message.connectionsOut} " +
-                        "trafficAvailable=$trafficAvailable",
-                )
+                        "trafficAvailable=$trafficAvailable"
+                }
             }
 
             // Cached even when deduped, so getStatus() on resume returns the true last value
@@ -868,7 +867,7 @@ class NexusPlugin : Plugin() {
          * indirect coupling ipc-boundary.md exists to prevent.
          */
         override fun setDefaultLogLevel(level: Int) {
-            Log.d(TAG, "core default log level = $level")
+            NexusLog.d(TAG) { "core default log level = $level" }
         }
 
         override fun initializeClashMode(modes: StringIterator?, current: String?) {
@@ -918,7 +917,7 @@ class NexusPlugin : Plugin() {
             client.connect()
             logClient = client
         } catch (e: Exception) {
-            Log.d(TAG, "log client not connected: ${e.message}")
+            NexusLog.d(TAG) { "log client not connected: ${e.message}" }
         }
     }
 
@@ -954,7 +953,7 @@ class NexusPlugin : Plugin() {
                 // timeout report the failure, otherwise the first tick after dispatch (before
                 // the measurement finishes) would be reported as a failure every time.
                 val delay = item.urlTestDelay
-                Log.i(TAG, "outbounds tick: tag=${item.tag} type=${item.type} delay=$delay")
+                NexusLog.d(TAG) { "outbounds tick: tag=${item.tag} type=${item.type} delay=$delay" }
                 if (delay <= 0) continue
 
                 notifyListeners("proxyDelay", JSObject().put("delayMs", delay).put("ok", true))

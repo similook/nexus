@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.VpnService
-import android.util.Log
 
 /**
  * Reconnects after boot or app update — but only if the user explicitly asked for it.
@@ -32,7 +31,7 @@ internal class BootReceiver : BroadcastReceiver() {
 
         val config = prefs.getString(KEY_LAST_CONFIG, null)
         if (config.isNullOrBlank()) {
-            Log.w(TAG, "auto-connect enabled but no stored config")
+            NexusLog.w(TAG, "auto-connect enabled but no stored config")
             return
         }
 
@@ -40,7 +39,7 @@ internal class BootReceiver : BroadcastReceiver() {
         // Settings). We cannot show the consent dialog from a receiver, so give up quietly —
         // the user will be prompted the next time they open the app.
         if (VpnService.prepare(context) != null) {
-            Log.i(TAG, "VPN consent not granted; skipping auto-connect")
+            NexusLog.i(TAG, "VPN consent not granted; skipping auto-connect")
             return
         }
 
@@ -50,7 +49,7 @@ internal class BootReceiver : BroadcastReceiver() {
                     .setAction(NexusVpnService.ACTION_START)
                     .putExtra(NexusVpnService.EXTRA_CONFIG, config)
             )
-        }.onFailure { Log.e(TAG, "auto-connect failed", it) }
+        }.onFailure { NexusLog.e(TAG, "auto-connect failed", it) }
     }
 
     companion object {
@@ -58,6 +57,9 @@ internal class BootReceiver : BroadcastReceiver() {
         const val PREFS = "nexus.prefs"
         const val KEY_AUTO_CONNECT = "auto_connect"
         const val KEY_LAST_CONFIG = "last_config"
+
+        /** Display name that went with KEY_LAST_CONFIG, for the notification body. */
+        const val KEY_LAST_NAME = "last_name"
 
         fun preferences(context: Context): SharedPreferences =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

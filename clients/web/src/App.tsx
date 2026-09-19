@@ -4,7 +4,7 @@ import { BottomNav, type Tab } from './components/BottomNav';
 import { ToastProvider } from './components/Toast';
 import { NexusProvider, useNexus } from './core/NexusProvider';
 import { useSubscriptions } from './core/useSubscriptions';
-import { loadSelectedId, saveSelectedId } from './core/selection';
+import { loadSelection, saveSelection } from './core/selection';
 import { protocolOf, type ServerNode } from './data/servers';
 import { HomeView } from './views/HomeView';
 import { LogsView } from './views/LogsView';
@@ -57,7 +57,7 @@ function Shell() {
    * gone, this must stop influencing anything. Leaving it in play would resurrect a stale
    * choice every time the list changed.
    */
-  const pendingRestoreRef = useRef<string | null>(loadSelectedId());
+  const pendingRestoreRef = useRef(loadSelection());
 
   /**
    * Auto-selection (item 5 of the device feedback):
@@ -82,24 +82,37 @@ function Shell() {
      * is abandoned and the normal auto-pick below takes over. Silently keeping a dangling id
      * is how you get a Connect button that does nothing.
      */
-    const restoreId = pendingRestoreRef.current;
-    if (restoreId !== null && pool.length > 0) {
+    // Consumed only once the list is populated, so an unhydrated first pass cannot burn it.
+    const restore = pendingRestoreRef.current;
+    if (restore !== null && pool.length > 0) {
       pendingRestoreRef.current = null;
-      const remembered = pool.find((n) => n.id === restoreId);
+      const remembered = pool.find((n) => n.id === restore.id);
       if (remembered) {
-        userChoseRef.current = true;
+        // Only a MANUAL choice outranks auto-selection. Restoring an auto-pick as though the
+        // user had made it would freeze the app's own default forever: lowest-ping would run
+        // once on the first launch and never again.
+        userChoseRef.current = restore.manual;
         setSelected(remembered);
         return;
       }
     }
 
     if (pool.length === 0) {
-      // The last node was removed. Clearing is the honest state; leaving `selected` pointing
-      // at a deleted node is how you get a Connect button that silently does nothing.
+      // GUARDED ON `hydrated`, and this guard is the whole bug.
+      //
+      // The node list used to arrive one render late, so every cold start ran this branch
+      // against an empty pool and wiped the persisted selection before the list had loaded.
+      // The in-memory ref still restored the node for that session, which is why it looked
+      // fine - and then the NEXT launch had nothing left to restore.
+      //
+      // "Empty" and "not loaded yet" are different facts and only one of them justifies
+      // destroying the user's choice.
+      if (!subs.hydrated) return;
+
+      // Genuinely empty. Clearing is the honest state; leaving `selected` pointing at a
+      // deleted node is how you get a Connect button that silently does nothing.
       if (selected !== null) setSelected(null);
-      // Forget the remembered id too - it can only refer to something deleted now, and
-      // keeping it would make the next import restore a node the user did not choose.
-      saveSelectedId(null);
+      saveSelection(null);
       return;
     }
 
@@ -109,6 +122,10 @@ function Shell() {
 
     if (pool.length === 1) {
       setSelected(pool[0]);
+      // Auto-picks are persisted too, marked as such. Without this the app re-derives its
+      // choice on every launch, which to a user who never opened the Servers tab looks
+      // exactly like "it reset to the first server".
+      saveSelection({ id: pool[0].id, manual: false });
       return;
     }
 
@@ -122,7 +139,8 @@ function Shell() {
     })[0];
 
     setSelected(best);
-  }, [subs.nodes, selected]);
+    saveSelection({ id: best.id, manual: false });
+  }, [subs.nodes, subs.hydrated, selected]);
 
   /**
    * Item 6: selecting a node while connected swaps the tunnel in place.
@@ -138,10 +156,12 @@ function Shell() {
     (node: ServerNode) => {
       userChoseRef.current = true;
       setSelected(node);
-      saveSelectedId(node.id);
+      saveSelection({ id: node.id, manual: true });
 
       if (connection === 'connected' || connection === 'connecting') {
-        // Full stop/start, not a hot reload - see switchTo for why the reload path stalled.
+        // One start. NexusVpnService closes the outgoing core and opens the new one on its
+        // own single-threaded executor, so the cache-file lock is released before it is
+        // reacquired - see the note on NexusVpnService.start.
         void switchTo(node.config, node.name).catch(() => {
           // Surfaced by ServersView's toast; swallowing here keeps selection working even if
           // the swap fails.

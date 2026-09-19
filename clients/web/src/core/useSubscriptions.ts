@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   importSubscription,
   isInsecureUrl,
@@ -44,6 +44,16 @@ export interface SubscriptionRecord {
 /** Manually pasted single configs, kept separately from any subscription. */
 const MANUAL_KEY = 'nexus.manualNodes.v2';
 
+function loadManual(): ServerNode[] {
+  try {
+    const raw = localStorage.getItem(MANUAL_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as ServerNode[]).map(rebuildNodeConfig) : [];
+  } catch {
+    return [];
+  }
+}
+
 function load(): SubscriptionRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -76,6 +86,14 @@ function save(records: SubscriptionRecord[]): void {
 }
 
 export interface UseSubscriptions {
+  /**
+   * False until the stored lists have been read.
+   *
+   * Consumers MUST NOT treat an empty `nodes` as "the user has no servers" while this is
+   * false. Clearing persisted state on an unhydrated pass is what made the selected server
+   * reset on every relaunch.
+   */
+  hydrated: boolean;
   subscriptions: SubscriptionRecord[];
   /** Manually pasted single configs. */
   manualNodes: ServerNode[];
@@ -115,22 +133,31 @@ export interface UseSubscriptions {
 }
 
 export function useSubscriptions(): UseSubscriptions {
-  const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
-  const [manualNodes, setManualNodes] = useState<ServerNode[]>([]);
+  /*
+   * HYDRATED SYNCHRONOUSLY, via the lazy useState initialiser.
+   *
+   * These used to start as [] and fill in from a useEffect, which gave every cold start one
+   * render with an empty node list. Anything reading the list on that pass saw a user with no
+   * servers - and App's auto-selection reacted by clearing the persisted choice, so the
+   * selection survived the session but was gone by the next launch. The symptom was "it
+   * forgets my server when I swipe the app away".
+   *
+   * localStorage is synchronous. There was never a reason to defer this to an effect, and
+   * deferring it created a state the rest of the app had to be careful about.
+   */
+  const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>(load);
+  const [manualNodes, setManualNodes] = useState<ServerNode[]>(loadManual);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    setSubscriptions(load());
-    try {
-      const raw = localStorage.getItem(MANUAL_KEY);
-      const parsed: unknown = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        setManualNodes((parsed as ServerNode[]).map(rebuildNodeConfig));
-      }
-    } catch {
-      setManualNodes([]);
-    }
-  }, []);
+  /*
+   * Belt and braces for whoever makes this asynchronous again.
+   *
+   * It is `true` from the first render today. It exists so consumers can express "the list is
+   * genuinely empty" rather than "the list has not loaded", which is the distinction that was
+   * missing - and if storage ever moves to Capacitor Preferences (which IS async), this is the
+   * flag that keeps the bug from coming back.
+   */
+  const hydrated = true;
 
   const persist = useCallback((next: SubscriptionRecord[]) => {
     setSubscriptions(next);
@@ -280,6 +307,7 @@ export function useSubscriptions(): UseSubscriptions {
   const nodes = [...subscriptions.flatMap((r) => r.nodes), ...manualNodes];
 
   return {
+    hydrated,
     subscriptions,
     manualNodes,
     nodes,

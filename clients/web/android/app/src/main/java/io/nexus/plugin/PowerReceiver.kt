@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.PowerManager
-import android.util.Log
 import androidx.core.content.ContextCompat
 
 /**
@@ -71,7 +70,7 @@ internal class PowerReceiver(
     fun unregister(context: Context) {
         if (!registered) return
         runCatching { context.unregisterReceiver(this) }
-            .onFailure { Log.w(TAG, "unregister failed", it) }
+            .onFailure { NexusLog.w(TAG, "unregister failed", it) }
         registered = false
     }
 
@@ -98,7 +97,7 @@ internal class PowerReceiver(
                 // If we later want saver-specific behaviour (longer QUIC keepalives, say),
                 // it belongs in Go as its own input, not folded into the idle signal.
                 val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-                Log.d(TAG, "power save mode = ${power.isPowerSaveMode} (informational)")
+                NexusLog.d(TAG) { "power save mode = ${power.isPowerSaveMode} (informational)" }
             }
         }
     }
