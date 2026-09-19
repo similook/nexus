@@ -1,14 +1,26 @@
 # Nexus
 
+[![Licence: GPL v3](https://img.shields.io/badge/Licence-GPLv3-blue.svg)](LICENSE)
+
 **A battery-conscious anti-censorship client for Android, built on sing-box 1.14.**
+
+Nexus is a universal client for reaching the open internet from a restricted network. It is not
+built for any one country or any one filtering technique — it speaks the protocols people
+already use, everywhere they are used, and the defences it implements (FakeIP, resolver-answer
+validation, IPv6 fail-closed) are structural rather than tuned to a particular adversary.
+
+It knows nothing about you, because there is nothing to know: no accounts, no sign-up, no
+servers operated by this project, no analytics, no crash reporting. You bring your own server
+or subscription, the credentials never leave the device, and there is no operator who could be
+asked for data they do not have. See [Security and privacy](#security-and-privacy).
 
 Most proxy clients are judged on throughput. Nexus is built around a different premise: on a
 phone, the thing you actually notice is the battery, and the dominant cost is not moving bytes
 — it is waking the cellular radio to move a few of them. Nexus is designed so an idle tunnel is
 genuinely idle.
 
-> **Status: v1.0.0, first public release.** Android only, `arm64-v8a` only. iOS is designed for
-> but not built. See [Limitations](#limitations) before you install.
+> **Status: v1.1.0.** Android only, `arm64-v8a` only. iOS is designed for but not built.
+> See [Limitations](#limitations) before you install.
 
 ---
 
@@ -37,8 +49,8 @@ Every one of these is checked on every build against sing-box's own validator �
   view, which glues links together: `…#Name1vmess://…#Name2`. Nexus splits these correctly by
   locating each `://` and walking back for the longest known scheme — `vless` wins over `ss` at
   the same colon, so a VLESS link is never mis-split into a bogus Shadowsocks one.
-- **Prose tolerated.** Banners, Persian text, adverts, `t.me` links and duplicates are all
-  filtered out; only the real URIs survive.
+- **Prose tolerated.** Banners, adverts, `t.me` links, duplicates and surrounding text in any
+  language or script are all filtered out; only the real URIs survive.
 - **Base64 subscription bodies** pasted directly are decoded.
 - **QR scanning** for single configs or subscription URLs.
 
@@ -312,6 +324,52 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
 ## Licence
 
-See [LICENSE](LICENSE).
+**GNU General Public License v3.0** — the full text is in [LICENSE](LICENSE).
 
-Nexus embeds [sing-box](https://github.com/SagerNet/sing-box) by SagerNet.
+```
+Nexus — a battery-conscious anti-censorship client
+Copyright (C) 2026 the Nexus contributors
+
+This program is free software: you can redistribute it and/or modify it under the terms of
+the GNU General Public License as published by the Free Software Foundation, either version
+3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program.
+If not, see <https://www.gnu.org/licenses/>.
+```
+
+### Why GPLv3 and not something permissive
+
+Not a preference — a requirement, and one worth understanding before you fork.
+
+Nexus links [sing-box](https://github.com/SagerNet/sing-box), which is **GPL-3.0-or-later**.
+Linking GPL code into an application makes the combined work a derivative, so the whole of
+Nexus must be distributed under terms no more restrictive than the GPL. There was never a
+permissive option available here.
+
+It also suits the threat model. For a tool whose entire value rests on "it does not phone
+home", copyleft is what keeps that checkable: anyone distributing a modified build has to
+publish the modification too, so a binary that quietly added telemetry could not be handed
+out as Nexus without the source that proves it.
+
+**If you distribute a modified build**, GPLv3 requires you to make the corresponding source
+available to the people you distribute it to, under the same licence, with your changes
+stated. Building it privately for yourself carries no such obligation.
+
+### Third-party components
+
+| Component | Licence | Note |
+|---|---|---|
+| [sing-box](https://github.com/SagerNet/sing-box) | GPL-3.0-or-later (+ naming term) | The proxy core, embedded via gomobile |
+| [Capacitor](https://capacitorjs.com/) | MIT | Native shell and plugin bridge |
+| [React](https://react.dev/) | MIT | The UI |
+| [jsQR](https://github.com/cozmo/jsQR) | Apache-2.0 | QR decoding |
+
+sing-box carries an **additional term** under GPLv3 §7: no derivative work may use its name
+or imply association with it without prior consent. Nexus names sing-box as a factual
+statement of what it is built on, nothing more — **this project is not affiliated with,
+endorsed by, or supported by SagerNet.** Fork accordingly.

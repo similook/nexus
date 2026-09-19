@@ -195,7 +195,8 @@ function base64Decode(input: string): string {
   let s = input.replace(/-/g, '+').replace(/_/g, '/');
   while (s.length % 4 !== 0) s += '=';
   const binary = atob(s);
-  // Decode as UTF-8: node names are routinely non-ASCII (flags, Chinese, Persian).
+  // Decode as UTF-8: node names are routinely non-ASCII - flags, CJK, and every other
+  // script a provider might label a server in.
   const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
   return new TextDecoder('utf-8').decode(bytes);
 }
@@ -312,7 +313,8 @@ function transportFromParams(params: URLSearchParams): Record<string, unknown> |
       // tcp.
       //
       // Plain TCP needs no transport block - EXCEPT when the link asks for v2ray's HTTP
-      // header masquerade (`headerType=http`), which is common on Iranian domestic relays.
+      // header masquerade (`headerType=http`), which is widely used where plain TLS to an
+      // unfamiliar host draws attention and traffic has to look like ordinary web browsing.
       //
       // I first rejected this combination, having read that
       // option/v2ray_transport.go accepts only http/ws/quic/grpc/httpupgrade and concluded
@@ -691,7 +693,8 @@ export function parseSubscription(body: string, sourceId: string): ParseResult {
  * Pull every proxy URI out of arbitrary pasted text.
  *
  * Users do not paste clean lists. They paste a Telegram message with a channel banner, three
- * lines of Persian, five links and an advert - and expect the links to be found. So this
+ * lines of prose in whatever language the channel is written in, five links and an advert -
+ * and expect the links to be found. So this
  * scans rather than splits: a URI cannot contain whitespace or a quote, which makes the run of
  * non-space characters after a known scheme an exact match.
  *

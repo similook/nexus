@@ -181,7 +181,7 @@ internal object ConfigGuard {
      * With both blocked, the server hostname never resolves and every outbound fails:
      *
      *   connection: listen packet connection using outbound/vless[proxy]:
-     *     lookup v8.anarsong.ir: connection reset by peer
+     *     lookup proxy.example.net: connection reset by peer
      *
      * Android's own resolver, however, demonstrably works on this device - the subscription was
      * downloaded through it moments earlier. So we resolve here, natively, once, and hand the
@@ -330,10 +330,14 @@ internal object ConfigGuard {
      *
      *   inbound/tun[tun-in]: inbound packet connection to 10.10.34.35:443
      *
-     * 10.10.34.35 is one of the well-known Iranian filtering blackholes, and it is RFC1918.
-     * Without this check the tunnel connects to it, every flow closes after ~200ms having moved
-     * nothing, and the app reports "connected" the whole time. That is the worst possible
-     * failure: silent, and it looks like the server's fault.
+     * That address is RFC1918 - private, and therefore unreachable across the internet, so no
+     * public proxy server can be behind it. Redirecting blocked lookups to a private-range
+     * blackhole is a common filtering technique; the particular address varies by network, so
+     * this checks the PROPERTY rather than matching a list of known ones.
+     *
+     * Without this check the tunnel connects to the blackhole, every flow closes after ~200ms
+     * having moved nothing, and the app reports "connected" the whole time. That is the worst
+     * possible failure: silent, and it looks like the server's fault.
      *
      * Rejecting instead means the user gets a sentence naming the problem.
      */

@@ -31,7 +31,7 @@
  * CONFIRMED ON DEVICE with `gvisor`: TCP flows appear and complete -
  *
  *   inbound/tun[tun-in]: inbound connection from 172.19.0.1:58484
- *   router: sniffed protocol: tls, domain: test-gateway.instagram.com
+ *   router: sniffed protocol: tls, domain: example.com
  *   connection: connection upload finished
  *
  * plus sniffed `http` and `ssh` flows. The hypothesis held.

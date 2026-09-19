@@ -93,3 +93,25 @@ copy to the other, and make sure both are in your commit.
 - Say what you tested on. "Built and typechecked" and "ran on a Pixel 6 with a REALITY node"
   are very different claims, and the second is the one that matters here.
 - If you changed anything in the config pipeline, paste the `check-configs.sh` output.
+
+## Licensing your contribution
+
+Nexus is **GPL-3.0-or-later** ([LICENSE](LICENSE)), because it links sing-box, which is GPL.
+By opening a PR you agree your contribution ships under those terms. There is no CLA and no
+copyright assignment — you keep your copyright, the code stays copyleft.
+
+Do not paste code from a project under an incompatible licence, and say where anything you
+did not write yourself came from.
+
+## Keep it regionally neutral
+
+Write about censorship in general terms — "a censored network", "the local resolver is being
+intercepted" — rather than naming countries, ISPs or specific filtering programmes.
+
+Two reasons. A technique described generally stays useful when the adversary changes tactics
+or the reader lives somewhere else; one described as "the X problem" quietly reads as "not
+your problem" to everyone else. And a repository that reads as targeting one country invites
+being treated that way, which is a risk carried by contributors and users, not by the text.
+
+The same goes for evidence: log excerpts in comments are welcome and have earned their place
+here, but scrub real hostnames to `example.com` before committing them.
