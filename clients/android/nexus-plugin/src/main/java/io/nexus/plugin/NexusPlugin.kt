@@ -2,9 +2,14 @@ package io.nexus.plugin
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -43,6 +48,15 @@ import io.nexus.nexuscore.Nexuscore
  */
 @CapacitorPlugin(name = "NexusCore")
 class NexusPlugin : Plugin() {
+
+    /**
+     * Device-network status. See [NetworkStatusMonitor].
+     *
+     * Registered only while the WebView is visible, for the same reason the status stream is:
+     * a callback left registered in the background wakes this process every time the phone
+     * changes cell, to refresh a card nobody is looking at.
+     */
+    private val networkMonitor = NetworkStatusMonitor()
 
     private var statusClient: CommandClient? = null
     private var groupsClient: CommandClient? = null
@@ -551,6 +565,19 @@ class NexusPlugin : Plugin() {
     }
 
     /**
+     * One-shot snapshot of the DEVICE's network state, for initial mount and for
+     * reconciliation when the app returns to the foreground.
+     *
+     * NOT A POLLING ENDPOINT - the same rule getStatus() carries. Live values arrive on the
+     * "networkStatus" listener, which ConnectivityManager pushes; there is no timer anywhere
+     * in this path and there must not be one.
+     */
+    @PluginMethod
+    fun getNetworkStatus(call: PluginCall) {
+        call.resolve(networkMonitor.snapshot())
+    }
+
+    /**
      * Logs are PULLED, never streamed (ipc-boundary.md R3). The core keeps a bounded ring
      * (LogMaxLines = 512); we read it when a log screen opens.
      */
@@ -596,6 +623,7 @@ class NexusPlugin : Plugin() {
     override fun handleOnResume() {
         super.handleOnResume()
         setUIForeground(true)
+        networkMonitor.start()
         if (intendedRunning) {
             // Retry until the socket answers. A single attempt that loses the race would
             // leave the UI in "unknown" with nothing scheduled to resolve it.
@@ -608,6 +636,7 @@ class NexusPlugin : Plugin() {
     override fun handleOnPause() {
         super.handleOnPause()
         cancelStatusProbe()
+        networkMonitor.stop()
         // Not a throttle, not a filter: we DISCONNECT. A backgrounded WebView that keeps a
         // 1 Hz subscription open is 86,400 wakeups a day to update a view nobody is looking
         // at. This is the same policy as the Go-side coalescer, applied to the UI channel.
@@ -1003,6 +1032,209 @@ class NexusPlugin : Plugin() {
         override fun setDefaultLogLevel(level: Int) = Unit
         override fun initializeClashMode(modes: StringIterator?, current: String?) = Unit
         override fun updateClashMode(mode: String?) = Unit
+    }
+
+    // ================================================================================
+    // Device network status
+    // ================================================================================
+
+    /**
+     * Read-only observation of the DEVICE'S UNDERLYING NETWORK.
+     *
+     * ============================== WHAT THIS IS NOT ==============================
+     *
+     * It is not a speed test and must never become one. It opens no socket, sends no packet,
+     * contacts no server, and starts no timer. Every value below is read out of
+     * NetworkCapabilities objects that ConnectivityManager hands us for its own reasons, so
+     * the marginal cost is zero packets and zero wakeups of our own.
+     *
+     * It also says NOTHING about the tunnel. A perfect Wi-Fi link with a blocked proxy reads
+     * "Network OK" here, because that is the honest answer to the only question this class
+     * can answer: is the PHONE on a working network. Do not relabel it as connection quality,
+     * signal, speed, or stability - none of those are measured, and most of them cannot be
+     * measured from this API at all.
+     *
+     * ========================== WHY IT IS A SECOND MONITOR ==========================
+     *
+     * DefaultNetworkMonitor in PlatformInterfaceWrapper.kt does something similar, but it
+     * lives in :core - a different OS process - and exists to feed sing-box's routing. Its
+     * state is not readable from here without new cross-process IPC, and the tunnel's routing
+     * input is the last thing a status card should share a code path with.
+     *
+     * So this is a deliberately separate, read-only observer in the app process. It cannot
+     * affect the tunnel because it shares nothing with it: different process, no shared
+     * state, no locks the tunnel takes, and an API that only reads.
+     *
+     * The NOT_VPN filter is copied from that class for the reason documented there - without
+     * it the callback reports tun0 and we would be describing our own tunnel back to the
+     * user. It also keeps the reading correct when a THIRD-PARTY VPN is active.
+     *
+     * =============================== FAILURE POLICY ===============================
+     *
+     * Every framework call is wrapped. This feature is decorative; it is not allowed to throw
+     * into the plugin lifecycle and take the VPN down with it. If registration fails we log
+     * and report "unknown" forever, which is the correct degradation.
+     */
+    private inner class NetworkStatusMonitor {
+
+        private val lock = Any()
+
+        /**
+         * Networks matching the request, and their latest capabilities.
+         *
+         * Populated ONLY from onCapabilitiesChanged, which the framework delivers immediately
+         * after onAvailable for every matching network. Deriving from the callback arguments
+         * is what keeps us off cm.allNetworks, deprecated since API 31.
+         */
+        private val seen = LinkedHashMap<Network, NetworkCapabilities>()
+
+        private var manager: ConnectivityManager? = null
+        private var callback: ConnectivityManager.NetworkCallback? = null
+
+        /** Heard anything yet? Until then "no networks" means "not asked", not "none". */
+        private var settled = false
+
+        /** Last emitted "state|transport", so an unchanged reading costs nothing. */
+        private var lastSignature: String? = null
+
+        fun start() {
+            // Defensive, and load-bearing. ConnectivityManager caps concurrent requests PER
+            // UID, and :core holds requests against the same UID - so a leak here could
+            // eventually make the CORE's registration throw and break sing-box's routing
+            // updates. Registering exactly once per start is what makes that impossible.
+            stop()
+
+            val cm = runCatching {
+                context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            }.getOrNull() ?: return
+
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                // Deliberately does not emit: capabilities are unknown at this point and
+                // onCapabilitiesChanged follows immediately. Emitting here would publish a
+                // momentary "unverified" for every network that is actually fine.
+                override fun onAvailable(network: Network) {
+                    synchronized(lock) { settled = true }
+                }
+
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    synchronized(lock) {
+                        settled = true
+                        seen[network] = caps
+                    }
+                    emitIfChanged()
+                }
+
+                override fun onLost(network: Network) {
+                    synchronized(lock) {
+                        settled = true
+                        seen.remove(network)
+                    }
+                    emitIfChanged()
+                }
+            }
+
+            synchronized(lock) {
+                seen.clear()
+                lastSignature = null
+                // registerNetworkCallback only calls back for networks that EXIST. With no
+                // network at all it stays silent forever, so without this one read the card
+                // would sit on "unavailable" in precisely the case the user most needs to see
+                // "No network". One read at registration - never on a timer, never repeated.
+                settled = runCatching { cm.activeNetwork }.getOrNull() == null
+            }
+
+            val registered = runCatching { cm.registerNetworkCallback(request, cb) }
+            registered.onFailure { NexusLog.w(TAG, "networkStatus: register failed", it) }
+            if (registered.isFailure) return
+
+            manager = cm
+            callback = cb
+        }
+
+        fun stop() {
+            val cm = manager
+            val cb = callback
+            // Cleared BEFORE the unregister call, so a throw cannot leave a stale handle that
+            // a later stop() would try to unregister a second time.
+            manager = null
+            callback = null
+            synchronized(lock) {
+                seen.clear()
+                settled = false
+                lastSignature = null
+            }
+            if (cm != null && cb != null) {
+                runCatching { cm.unregisterNetworkCallback(cb) }
+                    .onFailure { NexusLog.w(TAG, "networkStatus: unregister failed", it) }
+            }
+        }
+
+        fun snapshot(): JSObject = synchronized(lock) {
+            val derived = if (settled) derive() else "unknown" to "unknown"
+            JSObject().put("state", derived.first).put("transport", derived.second)
+        }
+
+        private fun emitIfChanged() {
+            var payload: JSObject? = null
+            synchronized(lock) {
+                val derived = derive()
+                val signature = derived.first + "|" + derived.second
+                if (signature != lastSignature) {
+                    lastSignature = signature
+                    payload = JSObject()
+                        .put("state", derived.first)
+                        .put("transport", derived.second)
+                }
+            }
+            payload?.let { notifyListeners("networkStatus", it) }
+        }
+
+        /** Caller must hold [lock]. Returns state to transport. */
+        private fun derive(): Pair<String, String> {
+            if (seen.isEmpty()) return "no_network" to "unknown"
+
+            // VALIDATED is API 23. Below that we genuinely cannot tell whether the link
+            // reaches anything, and inventing a validation result is exactly what this
+            // feature must not do - so the state is "unknown" and the card says so. Note
+            // "no network at all" above is still answerable on API 22, and still answered.
+            val canValidate = Build.VERSION.SDK_INT >= 23
+
+            // Prefer a validated link, mirroring the preference order DefaultNetworkMonitor
+            // uses for the core: with Wi-Fi and cellular both up, the validated one is the
+            // one actually carrying traffic.
+            val validated = if (canValidate) {
+                seen.values.firstOrNull {
+                    it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                }
+            } else {
+                null
+            }
+            val best = validated ?: seen.values.first()
+
+            val transport = when {
+                best.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                best.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+                best.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                else -> "unknown"
+            }
+
+            if (!canValidate) return "unknown" to transport
+
+            // Captive portal outranks validation: a portal is actionable ("go sign in"),
+            // which is more useful than either of the other two answers.
+            val state = when {
+                best.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) ->
+                    "captive_portal"
+                best.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) -> "ok"
+                else -> "unverified"
+            }
+            return state to transport
+        }
     }
 
     private companion object {

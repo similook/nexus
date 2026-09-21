@@ -319,6 +319,37 @@ done.
 
 ## Changelog
 
+### v1.3.0
+
+Adds a device-network indicator, and nothing else. Validated on a physical device
+(Samsung Android 16, arm64) against a live REALITY node.
+
+- **New "Device network" card on the home screen.** Reports whether the *phone* has a working
+  network, using only state Android already maintains: `NET_CAPABILITY_VALIDATED`,
+  `NET_CAPABILITY_INTERNET`, captive-portal detection, and the transport type. It reads
+  `Network OK`, `Network unverified`, `Sign-in required`, `No network`, or
+  `Network status unavailable`, with `Wi-Fi` / `Mobile` / `Ethernet` alongside.
+- **It is not a speed test, and deliberately shows no numbers.** No bandwidth estimate, no
+  latency, no signal strength, no probe, no timer, no socket, and **no new permission** - the
+  permission set is byte-identical to v1.2.0. Android's own bandwidth fields were considered
+  and rejected: they report a theoretical first-hop link rate, not throughput, so putting them
+  behind a threshold would show a confident number the app cannot stand behind.
+- **It describes the underlying link, never the tunnel.** The callback is filtered with
+  `NET_CAPABILITY_NOT_VPN`, so the card cannot report `tun0` back to the user, and it stays
+  correct when a third-party VPN is active. `Network OK` means Android validated the *link* -
+  it is not a claim that the proxy is reachable, and the wording avoids implying otherwise.
+- **`Network unverified` is amber, not red, on purpose.** Android decides validation by probing
+  a well-known endpoint; where that endpoint is blocked it can report failure while the
+  connection works. Red is reserved for "no network at all".
+- **Event-driven, registered only while the UI is visible.** It hooks the existing
+  resume/pause lifecycle and deduplicates natively, so an unchanged reading costs nothing and
+  a backgrounded app observes nothing. Measured at ~0.4% of one CPU core while backgrounded.
+- Behaviour on Android 5.1-5.x is reported as `Network status unavailable` rather than guessed,
+  since the validation capability only exists from API 23.
+
+All v1.2.0 fixes are unchanged and were re-validated: connect, disconnect, reconnect, real
+traffic, and background/resume with no transient connection error.
+
 ### v1.2.0
 
 Connection reliability and branding. Every item below was verified on a physical device

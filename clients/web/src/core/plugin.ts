@@ -70,6 +70,42 @@ export interface ClashModeEvent {
   current: string;
 }
 
+/**
+ * Qualitative state of the DEVICE'S OWN NETWORK, as Android's ConnectivityManager reports it.
+ *
+ * READ THIS BEFORE USING IT IN THE UI.
+ *
+ * This describes the phone's underlying link. It is NOT a measurement of anything, and it is
+ * NOT a statement about the tunnel:
+ *
+ *   * it is not speed, bandwidth, latency, packet loss or signal strength - none of those are
+ *     measured, no packet is sent, and several of them cannot be obtained from this API at
+ *     all without a location permission we deliberately do not request;
+ *   * 'ok' means Android validated the LINK, not that the proxy is reachable. A perfect Wi-Fi
+ *     connection with a blocked server reports 'ok'. Never label this as VPN health.
+ *
+ * 'unverified' deserves its name. It means Android's own connectivity probe did not confirm
+ * internet access - which on a censored network can happen while the connection works fine,
+ * because the probe endpoint itself may be blocked. Render it as amber and uncertain, never
+ * as red, "poor", "slow" or "unstable".
+ *
+ * 'unknown' is the honest answer before the first callback arrives, on API < 23 (where
+ * NET_CAPABILITY_VALIDATED does not exist), and if registration failed.
+ */
+export type NetworkStatusState =
+  | 'ok'
+  | 'unverified'
+  | 'captive_portal'
+  | 'no_network'
+  | 'unknown';
+
+export type NetworkTransport = 'wifi' | 'cellular' | 'ethernet' | 'unknown';
+
+export interface NetworkStatusEvent {
+  state: NetworkStatusState;
+  transport: NetworkTransport;
+}
+
 /** getStatus() returns the service state plus the last known status, if any. */
 export type StatusSnapshot = Partial<StatusMessage> & {
   state: ServiceState;
@@ -128,6 +164,19 @@ export interface NexusCorePlugin {
    * handles both; application code should not need to call this directly.
    */
   getStatus(): Promise<StatusSnapshot>;
+
+  /**
+   * One-shot snapshot of the device's network state. See NetworkStatusState.
+   *
+   * NOT A POLLING ENDPOINT, for the same reason getStatus() is not. Live values arrive on the
+   * 'networkStatus' listener, which the platform pushes; there is no timer in this path on
+   * either side of the bridge and there must not be one.
+   *
+   * Two legitimate uses: initial state on mount, and reconciliation on resume - the native
+   * monitor unregisters while backgrounded, so the last value is stale by however long the
+   * app was away.
+   */
+  getNetworkStatus(): Promise<NetworkStatusEvent>;
 
   // --- control: one-shot, never streaming ---
 
@@ -215,6 +264,18 @@ export interface NexusCorePlugin {
   addListener(
     eventName: 'proxyDelay',
     listener: (event: { delayMs: number; ok: boolean }) => void,
+  ): Promise<PluginListenerHandle>;
+
+  /**
+   * Device network state changed.
+   *
+   * Push-driven by ConnectivityManager and deduplicated natively, so this fires on actual
+   * change - typically a handful of times a session, not on a cadence. Registered only while
+   * the WebView is visible.
+   */
+  addListener(
+    eventName: 'networkStatus',
+    listener: (event: NetworkStatusEvent) => void,
   ): Promise<PluginListenerHandle>;
 
   addListener(

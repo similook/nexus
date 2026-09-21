@@ -1,6 +1,7 @@
 import { WebPlugin } from '@capacitor/core';
 import type {
   ClashModeEvent,
+  NetworkStatusEvent,
   NexusCorePlugin,
   ServiceState,
   StatusMessage,
@@ -55,6 +56,19 @@ export class NexusCoreWeb extends WebPlugin implements NexusCorePlugin {
 
   async getStatus(): Promise<StatusSnapshot> {
     return { state: this.state, ...this.last };
+  }
+
+  /**
+   * Always 'unknown' in the browser, deliberately.
+   *
+   * navigator.onLine exists but answers a different question - it is true whenever an
+   * interface is up, including one that reaches nothing - and navigator.connection is a
+   * bandwidth ESTIMATE, which is exactly the kind of invented number this feature refuses to
+   * show. There is no browser API for "did the system validate internet access", so the
+   * honest stub reports that it does not know.
+   */
+  async getNetworkStatus(): Promise<NetworkStatusEvent> {
+    return { state: 'unknown', transport: 'unknown' };
   }
 
   async selectOutbound(_options: { group: string; outbound: string }): Promise<void> {}

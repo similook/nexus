@@ -3,6 +3,8 @@ import { formatSpeedMB, formatTotal, formatUptime } from '../core/format';
 import { isQuicProtocol, type ServerNode } from '../data/servers';
 import { AdBanner } from '../components/AdBanner';
 import { useLivePing } from '../core/useLivePing';
+import { useNetworkStatus } from '../core/useNetworkStatus';
+import type { NetworkStatusState, NetworkTransport } from '../core/plugin';
 import { pingTone } from '../data/servers';
 
 /**
@@ -25,6 +27,8 @@ import { pingTone } from '../data/servers';
 export function HomeView({ node }: { node: ServerNode | null }) {
   // Polled only while this screen is in the foreground - see useLivePing.
   const livePing = useLivePing(node);
+  // Push-driven, no timer. Describes the PHONE's link, never the tunnel - see plugin.ts.
+  const network = useNetworkStatus();
   const {
     connection,
     error,
@@ -94,6 +98,31 @@ export function HomeView({ node }: { node: ServerNode | null }) {
           )}`}
         >
           {livePing === null ? '--' : `${livePing}ms`}
+        </span>
+      </div>
+
+      {/*
+        Device network.
+
+        The phone's own link, NOT the tunnel and NOT a speed test. Deliberately compact and
+        deliberately wordy about uncertainty: a green dot here means Android validated the
+        LINK, which is not the same as the proxy being reachable. See NetworkStatusState in
+        plugin.ts before changing any of this copy.
+      */}
+      <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 rounded-2xl bg-brand-surface border border-brand-border mb-4">
+        <span className="text-[10px] font-semibold text-brand-muted uppercase tracking-wider shrink-0">
+          Device network
+        </span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${networkTone(network.state)}`} />
+          <span className="text-[11px] font-medium text-white truncate">
+            {networkLabel(network.state)}
+          </span>
+          {transportLabel(network.transport) !== null && (
+            <span className="text-[10px] font-mono text-brand-muted shrink-0">
+              {transportLabel(network.transport)}
+            </span>
+          )}
         </span>
       </div>
 
@@ -233,4 +262,57 @@ function MetricCard(props: {
       </div>
     </div>
   );
+}
+
+/**
+ * Copy for the device-network card.
+ *
+ * Every string names the thing that was actually observed. There is deliberately no "Good",
+ * "Excellent", "Poor", "Slow", "Stable" or "Unstable" here, and no number: nothing in this
+ * path measures throughput, latency or reliability, so any of those words would be a claim
+ * the app cannot support. 'unverified' in particular must not become "poor" - on a censored
+ * network Android's validation probe can fail while the connection works.
+ */
+function networkLabel(state: NetworkStatusState): string {
+  switch (state) {
+    case 'ok':
+      return 'Network OK';
+    case 'unverified':
+      return 'Network unverified';
+    case 'captive_portal':
+      return 'Sign-in required';
+    case 'no_network':
+      return 'No network';
+    default:
+      return 'Network status unavailable';
+  }
+}
+
+/** Dot colour only. Amber for both uncertain states; red is reserved for "genuinely none". */
+function networkTone(state: NetworkStatusState): string {
+  switch (state) {
+    case 'ok':
+      return 'bg-emerald-400';
+    case 'unverified':
+    case 'captive_portal':
+      return 'bg-amber-400';
+    case 'no_network':
+      return 'bg-rose-400';
+    default:
+      return 'bg-brand-muted';
+  }
+}
+
+/** Null when the transport is unknown, so the card omits it rather than saying "unknown". */
+function transportLabel(transport: NetworkTransport): string | null {
+  switch (transport) {
+    case 'wifi':
+      return 'Wi-Fi';
+    case 'cellular':
+      return 'Mobile';
+    case 'ethernet':
+      return 'Ethernet';
+    default:
+      return null;
+  }
 }
