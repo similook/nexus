@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { BottomNav, type Tab } from './components/BottomNav';
-import { ToastProvider } from './components/Toast';
+import { ToastProvider, useToast } from './components/Toast';
 import { NexusProvider, useNexus } from './core/NexusProvider';
 import { useSubscriptions } from './core/useSubscriptions';
 import { loadSelection, saveSelection } from './core/selection';
@@ -36,6 +36,9 @@ function Shell() {
   // Home tab has to keep rendering it after ServersView unmounts.
   const subs = useSubscriptions();
   const { connection, switchTo } = useNexus();
+
+  // Shell renders inside ToastProvider, so this is legal here and would not be in App().
+  const toast = useToast();
 
   /**
    * Has the user picked a node themselves?
@@ -159,16 +162,23 @@ function Shell() {
       saveSelection({ id: node.id, manual: true });
 
       if (connection === 'connected' || connection === 'connecting') {
-        // One start. NexusVpnService closes the outgoing core and opens the new one on its
-        // own single-threaded executor, so the cache-file lock is released before it is
-        // reacquired - see the note on NexusVpnService.start.
-        void switchTo(node.config, node.name).catch(() => {
+        // A switch is now a visible, several-second operation - stop, wait for the cache-file
+        // lock to clear, then start - so it has to be narrated. Silence for four seconds after
+        // tapping a server reads as a dropped tap, and the user taps another one.
+        toast('Switching server… stopping current tunnel', '⟳');
+
+        void switchTo(node.config, node.name, (remaining) => {
+          // Toast.show() re-arms its own 2200 ms dismiss timer on every call, so calling it
+          // once a second keeps one toast on screen for the whole countdown rather than
+          // stacking four. No change to the component was needed.
+          toast(`Switching server… connecting in ${remaining}s`, '⟳');
+        }).catch(() => {
           // Surfaced by ServersView's toast; swallowing here keeps selection working even if
           // the swap fails.
         });
       }
     },
-    [connection, switchTo],
+    [connection, switchTo, toast],
   );
 
   return (

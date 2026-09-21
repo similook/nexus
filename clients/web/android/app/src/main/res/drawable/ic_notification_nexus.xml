@@ -1,0 +1,72 @@
+<!--
+  Notification small icon (status bar + shade).
+
+  WHY THIS IS A THIRD FILE AND NOT A REUSE OF ic_tile_nexus.
+
+  Android renders a notification's small icon as a SILHOUETTE: every non-transparent pixel is
+  repainted in the system tint, so only the alpha channel survives. That is the same constraint
+  the Quick Settings tile has - but the size budget is not the same. A QS tile draws at roughly
+  the full 24dp in a large touch target; a status-bar icon is squeezed into the notification
+  strip alongside the clock and the signal bars, and on a dense panel it renders visibly
+  smaller than the tile.
+
+  So the tile drawing is reused as a STARTING POINT and then simplified for the smaller size,
+  rather than shared outright:
+
+    - The core dot is dropped. At status-bar size it merges with the X crossing it and the
+      middle of the mark turns into an indistinct blob.
+    - The node dots shrink (30 -> 26) so they read as three points rather than fusing into
+      the triangle's corners.
+    - Every stroke is heavier again (X 34 -> 40, triangle 26 -> 30), because a line that is
+      legible at 24dp is a hairline once the status bar has scaled it down.
+    - The artwork is scaled slightly larger (0.072 -> 0.076) to use the available box, since
+      the status bar applies less padding of its own than the tile does.
+
+  The emblem is otherwise the same mark as the launcher icon and the tile - identical pathData
+  for the X and the triangle, taken from ic_launcher_monochrome.xml - so all three surfaces
+  read as the same brand.
+
+  WHAT THIS REPLACES.
+
+  ic_stat_nexus.xml, a generic shield-with-keyhole glyph that carried no Nexus branding at all.
+  That file is left in place rather than deleted: it is no longer referenced by anything, but
+  removing a resource is a separate change from switching to a new one, and keeping it costs a
+  few hundred bytes.
+
+  24dp is the required size for a status-bar icon.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <group android:translateX="12" android:translateY="12">
+        <group android:scaleX="0.076" android:scaleY="0.076">
+            <group android:translateX="-256" android:translateY="-232">
+                <!-- The X -->
+                <path
+                    android:strokeColor="#FFFFFFFF"
+                    android:strokeWidth="40"
+                    android:strokeLineCap="round"
+                    android:pathData="M160,160 L352,352"/>
+                <path
+                    android:strokeColor="#FFFFFFFF"
+                    android:strokeWidth="40"
+                    android:strokeLineCap="round"
+                    android:pathData="M352,160 L160,352"/>
+                <!-- Upward triangle -->
+                <path
+                    android:strokeColor="#FFFFFFFF"
+                    android:strokeWidth="30"
+                    android:strokeLineCap="round"
+                    android:strokeLineJoin="round"
+                    android:pathData="M256,135 L360,315 L152,315 Z"/>
+                <!-- Nodes -->
+                <path android:fillColor="#FFFFFFFF" android:pathData="M256,135 m-26,0 a26,26 0 1,0 52,0 a26,26 0 1,0 -52,0"/>
+                <path android:fillColor="#FFFFFFFF" android:pathData="M152,315 m-26,0 a26,26 0 1,0 52,0 a26,26 0 1,0 -52,0"/>
+                <path android:fillColor="#FFFFFFFF" android:pathData="M360,315 m-26,0 a26,26 0 1,0 52,0 a26,26 0 1,0 -52,0"/>
+            </group>
+        </group>
+    </group>
+</vector>

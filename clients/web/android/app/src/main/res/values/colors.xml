@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Splash colours only. Everything else the UI draws lives in Tailwind, inside the WebView.
+
+  nexusSplashBackground is the same navy as the adaptive icon's first gradient stop and
+  Tailwind's brand-navy, so the splash, the launcher icon and the app's own background are one
+  colour rather than three that nearly match.
+-->
+<resources>
+    <color name="nexusSplashBackground">#0F172A</color>
+</resources>

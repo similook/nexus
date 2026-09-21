@@ -40,12 +40,17 @@ export function HomeView({ node }: { node: ServerNode | null }) {
   const isConnected = connection === 'connected';
   const isBusy = connection === 'connecting';
 
-  const label = isConnected ? 'DISCONNECT' : isBusy ? 'CONNECTING' : 'CONNECT';
+  // 'CANCEL' while busy, not 'CONNECTING'.
+  //
+  // The button used to be disabled during a connect, so its label only had to describe a
+  // state. It is tappable now and performs an abort, so the label has to describe the ACTION -
+  // a button that says CONNECTING reads as "wait", which is the opposite of what it does.
+  const label = isConnected ? 'DISCONNECT' : isBusy ? 'CANCEL' : 'CONNECT';
 
   const title = isConnected
     ? 'Connected'
     : isBusy
-      ? 'Establishing tunnel…'
+      ? 'Establishing tunnel… (tap to cancel)'
       : connection === 'error'
         ? 'Connection failed'
         : 'Disconnected';
@@ -115,14 +120,24 @@ export function HomeView({ node }: { node: ServerNode | null }) {
           {/* #connect-btn */}
           <button
             onClick={() => node !== null && void toggle(node.config, node.name)}
-            // Disabled during the transition: the hook guards against double-taps anyway, but
-            // a button that visibly refuses is better than one that silently swallows.
-            disabled={isBusy || node === null}
+            // NOT disabled while connecting.
+            //
+            // It used to be `disabled={isBusy || node === null}`, and that was half of why a
+            // failed connect could only be escaped by force-killing the app: a start that
+            // never completed left the UI in 'connecting' forever, and the one control that
+            // could have stopped it was the one the state disabled. The tap never reached
+            // toggle(), which already routed 'connecting' to disconnect().
+            //
+            // The other half was in the hook, where disconnect() early-returned on the same
+            // in-flight guard. Both had to go; fixing either alone leaves the button dead.
+            //
+            // Still disabled with no node, which is a genuine nothing-to-do.
+            disabled={node === null}
             aria-busy={isBusy}
             aria-label={label}
             className={`relative z-10 w-44 h-44 rounded-full flex flex-col items-center justify-center
               transition-all duration-500 ease-out border-4 active:scale-95
-              disabled:cursor-wait
+              disabled:cursor-not-allowed
               ${
                 isConnected
                   ? // CONNECTED: filled amber, white on orange, hard glow. Unmistakable.

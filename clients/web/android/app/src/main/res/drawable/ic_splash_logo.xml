@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Splash icon for windowSplashScreenAnimatedIcon.
+
+  288dp canvas because that is what the Android 12+ splash contract expects; the emblem is
+  scaled to roughly 174dp so it sits inside the inner two-thirds the system keeps visible.
+  Anything larger is clipped by the circular mask some launchers apply.
+
+  The paths are the same emblem as ic_launcher_monochrome.xml, deliberately - one source of
+  truth for the mark, so the splash and the launcher icon cannot drift apart. Only the canvas
+  and the colour differ: the monochrome layer is flat black because the launcher tints it for
+  themed icons, whereas this one is drawn in brand orange on the navy the theme supplies.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group android:translateX="144" android:translateY="144">
+        <group android:scaleX="0.34" android:scaleY="0.34">
+            <group android:translateX="-256" android:translateY="-244">
+                <!-- The X -->
+                <path
+                    android:strokeColor="#FF6B00"
+                    android:strokeWidth="22"
+                    android:strokeLineCap="round"
+                    android:pathData="M160,160 L352,352"/>
+                <path
+                    android:strokeColor="#FF6B00"
+                    android:strokeWidth="22"
+                    android:strokeLineCap="round"
+                    android:pathData="M352,160 L160,352"/>
+                <!-- Upward triangle -->
+                <path
+                    android:strokeColor="#FF8A00"
+                    android:strokeWidth="10"
+                    android:strokeLineCap="round"
+                    android:strokeLineJoin="round"
+                    android:pathData="M256,135 L360,315 L152,315 Z"/>
+                <!-- Nodes -->
+                <path android:fillColor="#FFA439" android:pathData="M256,135 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <path android:fillColor="#FFA439" android:pathData="M152,315 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <path android:fillColor="#FFA439" android:pathData="M360,315 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+            </group>
+        </group>
+    </group>
+</vector>

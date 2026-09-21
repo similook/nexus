@@ -55,14 +55,87 @@ export interface NexusApi extends NexusState {
   disconnect: () => Promise<void>;
   /** Single toggle for a one-button UI. Ignores taps while a transition is in flight. */
   toggle: (config: string, name?: string) => Promise<void>;
-  /** Tear the tunnel down and bring it up on a different server. See the implementation. */
-  switchTo: (config: string, name?: string) => Promise<void>;
+  /**
+   * Tear the tunnel down and bring it up on a different server. See the implementation.
+   *
+   * onCountdown fires once a second during the cool-down with the seconds remaining, so the
+   * caller can show progress. It is optional: the switch is correct without it, just silent.
+   */
+  switchTo: (
+    config: string,
+    name?: string,
+    onCountdown?: (secondsRemaining: number) => void,
+  ) => Promise<void>;
   readLogs: (limit?: number) => Promise<string[]>;
   /** Fixed-capacity downlink history for a sparkline. Never grows (R5). */
   history: readonly number[];
 }
 
 const HISTORY_CAPACITY = 60;
+
+/**
+ * How long a start may take before the UI stops believing in it.
+ *
+ * A start that cannot complete used to leave the UI in 'connecting' forever - no error, no
+ * timeout, and a button that did nothing - so the only way out was force-killing the app. The
+ * core reports a failed handshake or an unresolvable server by simply not reaching 'started',
+ * which from up here is indistinguishable from "still trying".
+ *
+ * 10s is chosen to sit above a slow-but-real connect: TLS to a distant server on a bad mobile
+ * link, plus the DNS pre-resolution that happens before it, is comfortably inside that.
+ */
+const STARTUP_TIMEOUT_MS = 10_000;
+
+/**
+ * The gap between a full stop and the next start when switching servers.
+ *
+ * libbox always enables sing-box's cache file, and bbolt opens it with an exclusive flock and
+ * a one-second timeout. Two service lifecycles overlapping on that file is what produced
+ *
+ *     start or reload service: initialize cache-file: timeout
+ *
+ * 4s is four times that timeout, which is the point: the wait is not tuned to the lock, it is
+ * far enough clear of it that lock contention stops being a variable at all.
+ */
+const SWITCH_COOLDOWN_MS = 4_000;
+
+/** How long to wait for a stop to be confirmed before starting the cool-down anyway. */
+const STOP_SETTLE_TIMEOUT_MS = 5_000;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Is this 'stopped' the status STREAM being torn down, rather than the SERVICE stopping?
+ *
+ * The native plugin reports both through the same callback. NexusPlugin's StatusHandler does:
+ *
+ *     override fun disconnected(message: String?) {
+ *         notifyListeners("serviceState", ...put("state", "stopped").put("reason", message))
+ *     }
+ *
+ * and handleOnPause() deliberately calls disconnectClients() every time the WebView
+ * backgrounds - that is the R1 policy, because a backgrounded WebView holding a 1 Hz
+ * subscription is 86,400 wakeups a day to update a view nobody is looking at.
+ *
+ * So every ordinary background/resume cycle delivers a 'stopped' carrying gRPC's cancellation
+ * of OUR OWN context:
+ *
+ *     status stream recv: rpc error: code = Canceled desc = context canceled
+ *
+ * which this hook then rendered as connection: 'error' - the ~1s red "Connection failed" flash
+ * on resume, over a tunnel that never stopped.
+ *
+ * WHY MATCHING ON Canceled IS NARROW ENOUGH TO BE SAFE.
+ *
+ * gRPC's Canceled means the CALLER cancelled the context - it is the one status code that can
+ * only be produced by our own side hanging up. A core that actually died, a socket that broke,
+ * or a service that was stopped surfaces as Unavailable, Internal, DeadlineExceeded or a bare
+ * EOF, none of which match here. Genuine failures keep their existing path and still show red.
+ */
+function isLifecycleStreamCancel(reason: string | undefined): boolean {
+  if (!reason) return false;
+  return /code = Canceled/i.test(reason) || /context canceled/i.test(reason);
+}
 
 /**
  * Ceiling for a believable tunnel uptime, used to reject a bad anchor.
@@ -138,6 +211,61 @@ export function useNexusCore(): NexusApi {
   /** Guards against double-taps while a start/stop is in flight. */
   const transitionRef = useRef(false);
 
+  /**
+   * The current connection state, readable from a callback with no dependency on it.
+   *
+   * disconnect() must be able to tell a cancel from an ordinary stop, and it is a useCallback
+   * with an empty dependency list so that its identity is stable across renders. Reading
+   * state.connection there would mean adding it as a dependency and rebuilding the callback -
+   * and every consumer with it - on every state change.
+   */
+  const connectionRef = useRef<NexusState['connection']>('disconnected');
+
+  /** The startup watchdog. Armed by connect(), cleared the moment the core settles. */
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Set when the user cancels, so the switch cool-down knows to give up.
+   *
+   * Without it, cancelling during the 4s gap would stop nothing that is running and then start
+   * the new tunnel anyway when the timer expired - a connect the user explicitly cancelled.
+   */
+  const switchAbortRef = useRef(false);
+
+  /**
+   * True while switchTo is between its stop and its start.
+   *
+   * The 'stopped' event that arrives mid-switch is ours, not the user's, and rendering it as
+   * "disconnected" would flash the idle UI in the middle of an operation the user asked for.
+   * applyServiceState reads this to keep showing 'connecting' across the gap.
+   */
+  const switchingRef = useRef(false);
+
+  /**
+   * Set when a 'stopped' event actually arrives.
+   *
+   * switchTo has to wait for the teardown to be CONFIRMED, and the rendered connection state
+   * cannot tell it that: the switch sets 'connecting' before stopping, and applyServiceState
+   * deliberately keeps showing 'connecting' when a stop lands mid-switch. Both are right for
+   * the UI and useless as a signal, so the event is recorded separately from how it is drawn.
+   */
+  const stopConfirmedRef = useRef(false);
+
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current === null) return;
+    clearTimeout(watchdogRef.current);
+    watchdogRef.current = null;
+  }, []);
+
+  // Mirror the connection state into a ref for the callbacks above.
+  useEffect(() => {
+    connectionRef.current = state.connection;
+  }, [state.connection]);
+
+  // Nothing should outlive the hook. A watchdog that fires after unmount would call stop() on
+  // a tunnel the next mount is about to adopt.
+  useEffect(() => () => clearWatchdog(), [clearWatchdog]);
+
   const applyStatus = useCallback((status: Partial<StatusMessage>) => {
     // Re-anchor on every tick. Idempotent, and it is what makes the clock survive a resume:
     // the stream carries the core's start time, so the UI does not depend on getStatus()
@@ -169,6 +297,19 @@ export function useNexusCore(): NexusApi {
   }, [anchorToCore]);
 
   const applyServiceState = useCallback((serviceState: ServiceState, reason?: string) => {
+    // A cancelled status stream is not a stopped tunnel. Downgrade it to 'unknown', which is
+    // the state the contract already has for "cannot confirm either way": the switch below
+    // returns prev unchanged for it, so the connection state, the uptime anchor and the
+    // traffic history all survive the background/resume cycle untouched.
+    //
+    // Normalised here, at the entry point, rather than inside the 'stopped' branch - the code
+    // after the switch also keys off 'stopped' to wipe the sparkline history and to set
+    // stopConfirmedRef, and neither of those should fire for a stream that we ourselves closed.
+    if (serviceState === 'stopped' && isLifecycleStreamCancel(reason)) {
+      serviceState = 'unknown';
+      reason = undefined;
+    }
+
     setState((prev) => {
       switch (serviceState) {
         case 'started':
@@ -186,6 +327,14 @@ export function useNexusCore(): NexusApi {
 
         case 'stopped':
           connectedAtRef.current = null;
+
+          // A stop that arrives mid-switch is the first half of an operation still in
+          // progress. Reporting it as 'disconnected' would flash the idle screen - and worse,
+          // would let a stale reconcile decide the user is not connecting.
+          if (switchingRef.current) {
+            return { ...INITIAL, connection: 'connecting', error: null };
+          }
+
           return {
             ...INITIAL,
             // A reason on an unrequested stop means the core died or consent was revoked —
@@ -199,7 +348,13 @@ export function useNexusCore(): NexusApi {
     // Only a CONFIRMED stop clears the chart. 'unknown' must not, or a resume would wipe the
     // history it is about to resume displaying.
     if (serviceState === 'stopped') setHistory([]);
-  }, []);
+
+    // Record the teardown for switchTo, regardless of what the UI was told to render.
+    if (serviceState === 'stopped') stopConfirmedRef.current = true;
+
+    // The core has settled either way, so the watchdog has nothing left to catch.
+    if (serviceState === 'started' || serviceState === 'stopped') clearWatchdog();
+  }, [clearWatchdog]);
 
   const reconcile = useCallback(async () => {
     try {
@@ -331,11 +486,39 @@ export function useNexusCore(): NexusApi {
       transitionRef.current = true;
 
       setState((prev) => ({ ...prev, connection: 'connecting', error: null }));
+
+      // ARM THE WATCHDOG BEFORE THE CALL, NOT AFTER.
+      //
+      // start() resolving means the service accepted the request, not that a tunnel exists -
+      // the tunnel is confirmed by a later 'started' event, and the failure this catches is
+      // precisely the one where that event never comes. Arming afterwards would leave the gap
+      // uncovered for however long start() itself takes.
+      clearWatchdog();
+      watchdogRef.current = setTimeout(() => {
+        watchdogRef.current = null;
+        switchingRef.current = false;
+        connectedAtRef.current = null;
+        // Stop whatever half-started, so the core is not left running behind a UI that has
+        // given up on it. Failures here are expected - there may be nothing to stop.
+        void Promise.resolve(NexusCore.stop()).catch(() => {});
+        setState((prev) =>
+          prev.connection === 'connecting'
+            ? {
+                ...INITIAL,
+                connection: 'error',
+                error: 'Connection timed out after 10s. The server did not respond — try another node.',
+              }
+            : prev,
+        );
+      }, STARTUP_TIMEOUT_MS);
+
       try {
         await NexusCore.start({ config, name });
         // Do not optimistically set 'connected' — wait for the serviceState event. The
         // promise resolving means the service was asked to start, not that a tunnel exists.
       } catch (e) {
+        clearWatchdog();
+        switchingRef.current = false;
         const message = e instanceof Error ? e.message : String(e);
         const denied = /permission denied/i.test(message);
         connectedAtRef.current = null;
@@ -353,7 +536,24 @@ export function useNexusCore(): NexusApi {
   );
 
   const disconnect = useCallback(async () => {
-    if (transitionRef.current) return;
+    // A CANCEL MUST NEVER BE SWALLOWED.
+    //
+    // transitionRef is held for the whole of connect()'s start() call, and this used to open
+    // with a bare `if (transitionRef.current) return;`. That made disconnect a no-op during
+    // exactly the window where the user most wants it: while a start is in flight. toggle()
+    // already routed 'connecting' here, so the intent was right and the guard ate it - the
+    // button looked dead and force-killing the app was the only way out.
+    //
+    // The guard still does its real job, which is rejecting double-taps on a settled state.
+    const cancelling = connectionRef.current === 'connecting';
+    if (transitionRef.current && !cancelling) return;
+
+    // Abort anything the switch cool-down is waiting on, and stop the watchdog from firing a
+    // second stop underneath this one.
+    switchAbortRef.current = true;
+    switchingRef.current = false;
+    clearWatchdog();
+
     transitionRef.current = true;
     try {
       await NexusCore.stop();
@@ -369,7 +569,7 @@ export function useNexusCore(): NexusApi {
     } finally {
       transitionRef.current = false;
     }
-  }, []);
+  }, [clearWatchdog]);
 
   /**
    * Move a live tunnel to a different server.
@@ -392,22 +592,73 @@ export function useNexusCore(): NexusApi {
    * modelled.
    */
   const switchTo = useCallback(
-    async (config: string, name?: string) => {
-      // ONE start, no stop first.
+    async (
+      config: string,
+      name?: string,
+      onCountdown?: (secondsRemaining: number) => void,
+    ) => {
+      // STOP FULLY, WAIT, THEN START.
       //
-      // This used to stop and then start, which looked like the safe ordering and was not.
-      // libbox always enables sing-box's cache file, and bbolt opens it with an exclusive
-      // flock and a one-second timeout. Two service lifecycles racing over that file produced
+      // This has now been all three shapes, and the history is the argument for the current
+      // one:
       //
-      //     start or reload service: initialize cache-file: timeout
+      //   stop -> start          raced. libbox always enables sing-box's cache file, bbolt
+      //                          opens it with an exclusive flock and a one-second timeout,
+      //                          and two overlapping lifecycles produced
+      //                              start or reload service: initialize cache-file: timeout
+      //                          with the outgoing tun still open - the UI said disconnected
+      //                          while the system VPN key stayed lit.
       //
-      // with the outgoing tun interface still open - the UI showed disconnected while the
-      // system VPN key stayed lit.
+      //   start (atomic swap)    moved the race into NexusVpnService rather than removing it.
+      //                          The executor serialises the swap, but the close and the open
+      //                          still touch the same locked file inside one operation, so a
+      //                          slow close still deadlocks the start behind it.
       //
-      // The swap is now atomic on the native side: NexusVpnService receives a second
-      // ACTION_START, closes the running core and its tun fd, and opens the new one, all
-      // serialised on one executor inside a single service instance. From here it is just a
-      // connect.
+      //   stop -> WAIT -> start  what this does. The ordering that failed the first time,
+      //                          made safe by the thing it was missing: a gap long enough
+      //                          that the lock is provably gone before anything asks for it.
+      //
+      // The cost is a visible reconnect the user can see. For a VPN that is the right trade -
+      // a four-second gap that is explained beats a tunnel that is quietly wedged.
+      switchAbortRef.current = false;
+      switchingRef.current = true;
+      stopConfirmedRef.current = false;
+
+      // Own the state immediately. Without this the UI keeps rendering 'connected' through
+      // the stop, and the user taps the new server again thinking the first tap missed.
+      setState((prev) => ({ ...prev, connection: 'connecting', error: null }));
+
+      try {
+        await NexusCore.stop();
+      } catch {
+        // A stop that reports failure is still worth continuing from - the core may already
+        // be gone. The wait below is what makes that safe either way.
+      }
+
+      // Wait for the stop to be CONFIRMED, not just requested.
+      //
+      // stop() resolves when the service has accepted the request; the tunnel is actually
+      // down when the 'stopped' event lands. Starting the cool-down from the request would
+      // spend the gap on a teardown that had not begun.
+      const settleDeadline = Date.now() + STOP_SETTLE_TIMEOUT_MS;
+      while (!stopConfirmedRef.current && Date.now() < settleDeadline) {
+        if (switchAbortRef.current) { switchingRef.current = false; return; }
+        await sleep(100);
+      }
+
+      // The cool-down, counted down out loud.
+      const totalSeconds = Math.ceil(SWITCH_COOLDOWN_MS / 1000);
+      for (let remaining = totalSeconds; remaining > 0; remaining--) {
+        if (switchAbortRef.current) { switchingRef.current = false; return; }
+        onCountdown?.(remaining);
+        await sleep(1000);
+      }
+
+      if (switchAbortRef.current) { switchingRef.current = false; return; }
+
+      // Hand over to the ordinary connect path, which owns the watchdog and the error
+      // handling. A switch that fails past this point fails exactly like a normal connect.
+      switchingRef.current = false;
       await connect(config, name);
     },
     [connect],

@@ -1,0 +1,71 @@
+<!--
+  Quick Settings tile icon.
+
+  SEPARATE FILE FROM THE NOTIFICATION ICON.
+  The tile and the status-bar notification once shared ic_stat_nexus, so branding one would
+  have silently changed the other. They are different surfaces with different size budgets:
+  a tile draws at roughly the full 24dp, a status-bar icon is scaled down further. Each now
+  has its own drawable - the notification uses ic_notification_nexus.xml, which carries the
+  same emblem simplified for the smaller size.
+
+  SAME EMBLEM AS THE LAUNCHER ICON.
+  Every pathData string below is copied verbatim from ic_launcher_monochrome.xml - the X, the
+  triangle, the three nodes and the core. Nothing was redrawn, so the tile and the launcher
+  icon cannot drift into two different marks. Only two things differ, and both are forced by
+  the size:
+
+    THE TRANSFORM. The source draws in a 512-unit space on a 108dp canvas. A tile icon is
+    24dp, so the same artwork is re-centred and rescaled here: translate to the middle of the
+    24dp box, scale by 0.072, then shift the artwork's own centre (256, 228 - the midpoint of
+    its full extent including the node circles and the X's overshoot below the triangle base)
+    to the origin. That leaves roughly 1.5dp of clear space on every side, which the system
+    needs for its own padding.
+
+    THE STROKE WEIGHTS. 22 -> 34 for the X and 10 -> 26 for the triangle. At 0.072 the
+    original weights would render at 1.6dp and 0.7dp; the triangle in particular would be a
+    hairline that all but vanishes once the status bar downscales it. The new values land at
+    ~2.4dp and ~1.9dp. The fills (nodes, core) keep their original radii, so the emblem's
+    proportions are unchanged - only the lines are heavier, which is what small sizes need.
+
+  FLAT AND SINGLE-COLOUR, LIKE THE NOTIFICATION ICON AND FOR THE SAME REASON.
+  Quick Settings repaints the icon according to tile state - accent when active, dim when
+  inactive - so colour, gradients and detail in the source are discarded. Only the alpha
+  channel survives. A full-colour logo here would render as a solid blob.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <group android:translateX="12" android:translateY="12">
+        <group android:scaleX="0.072" android:scaleY="0.072">
+            <group android:translateX="-256" android:translateY="-228">
+                <!-- The X -->
+                <path
+                    android:strokeColor="#FFFFFFFF"
+                    android:strokeWidth="34"
+                    android:strokeLineCap="round"
+                    android:pathData="M160,160 L352,352"/>
+                <path
+                    android:strokeColor="#FFFFFFFF"
+                    android:strokeWidth="34"
+                    android:strokeLineCap="round"
+                    android:pathData="M352,160 L160,352"/>
+                <!-- Upward triangle -->
+                <path
+                    android:strokeColor="#FFFFFFFF"
+                    android:strokeWidth="26"
+                    android:strokeLineCap="round"
+                    android:strokeLineJoin="round"
+                    android:pathData="M256,135 L360,315 L152,315 Z"/>
+                <!-- Nodes -->
+                <path android:fillColor="#FFFFFFFF" android:pathData="M256,135 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <path android:fillColor="#FFFFFFFF" android:pathData="M152,315 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <path android:fillColor="#FFFFFFFF" android:pathData="M360,315 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"/>
+                <!-- Core -->
+                <path android:fillColor="#FFFFFFFF" android:pathData="M256,256 m-36,0 a36,36 0 1,0 72,0 a36,36 0 1,0 -72,0"/>
+            </group>
+        </group>
+    </group>
+</vector>

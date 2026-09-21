@@ -39,6 +39,9 @@ internal object ConfigGuard {
      */
     private const val MIN_HEALTH_CHECK_SECONDS = 600
 
+    /** Tag of the DNS server holding the natively-resolved outbound addresses. */
+    private const val HOSTS_DNS_TAG = "dns-hosts"
+
     class RejectedException(message: String) : IllegalArgumentException(message)
 
     /**
@@ -199,22 +202,61 @@ internal object ConfigGuard {
      */
     private fun resolveOutboundServers(root: JSONObject): Int {
         val outbounds: JSONArray = root.optJSONArray("outbounds") ?: return 0
-        var count = 0
+
+        // host -> every usable address for it. Shared across outbounds, so several nodes on
+        // one panel hostname cost one lookup and produce one entry.
+        val resolved = LinkedHashMap<String, List<InetAddress>>()
 
         for (i in 0 until outbounds.length()) {
             val outbound = outbounds.optJSONObject(i) ?: continue
             val host = outbound.optString("server", "")
             if (host.isEmpty() || isIpLiteral(host)) continue
 
-            val address = runCatching { InetAddress.getByName(host) }.getOrNull()
-            if (address == null) {
-                // Leave the hostname in place: the core may still manage it, and failing the
-                // whole connect because one lookup missed would be worse than trying.
-                NexusLog.w(TAG, "could not resolve $host; leaving the hostname for the core")
-                continue
+            // Resolve once per hostname. Reaching the far side of this block means the
+            // host has usable addresses recorded - every failure path inside continues.
+            if (!resolved.containsKey(host)) {
+                // getAllByName, not getByName.
+                //
+                // getByName returns one address and discards the rest, which pinned every
+                // connection to a single A record. If that one was dead or wrong there was no
+                // second attempt, because the core never saw the alternatives. Keeping them
+                // all is what lets sing-box retry.
+                val found = runCatching { InetAddress.getAllByName(host).toList() }
+                    .getOrElse { emptyList() }
+
+                if (found.isEmpty()) {
+                    // Leave the hostname alone. The core may still manage it through
+                    // default_domain_resolver, and failing the whole connect because one
+                    // lookup missed would be worse than letting it try.
+                    NexusLog.w(TAG, "could not resolve $host; leaving the hostname for the core")
+                    continue
+                }
+
+                // Drop poisoned answers and keep the rest. Refusing the config outright is
+                // reserved for the case where NOTHING survives: one bad address among several
+                // is a filter doing half a job, not a reason to refuse to connect.
+                val usable = found.filter { unusableReason(it) == null }
+                if (usable.isEmpty()) {
+                    // Everything came back poisoned. Re-check the first one purely to raise
+                    // the existing, carefully worded rejection with the right reason in it.
+                    assertUsableAddress(host, found.first())
+                    continue
+                }
+
+                resolved[host] = usable
+
+                // i(), not d(). This was debug-only, and v1.1.0's release gating compiled it
+                // out of exactly the builds users run - which is why a wrong resolution could
+                // not be diagnosed from a bug report. It is the single most useful line when a
+                // node connects to the wrong place, and a hostname plus an address the user
+                // already has is a far smaller disclosure than the outbound itself (still
+                // debug-only, see logProxyOutbound).
+                NexusLog.i(TAG, "resolved $host -> ${usable.joinToString { it.hostAddress ?: "?" }}")
             }
 
-            // Keep the hostname for TLS before overwriting `server`.
+            // Back-fill SNI when the link carried none. Still needed even though `server` now
+            // keeps the hostname: an outbound with TLS enabled and no server_name lets the
+            // core derive one, and for REALITY that is not necessarily the same string.
             val tls = outbound.optJSONObject("tls")
             if (tls != null && tls.optBoolean("enabled", false) &&
                 tls.optString("server_name", "").isEmpty()
@@ -222,13 +264,76 @@ internal object ConfigGuard {
                 tls.put("server_name", host)
             }
 
-            assertUsableAddress(host, address)
-
-            outbound.put("server", address.hostAddress)
-            NexusLog.d(TAG) { "resolved $host -> ${address.hostAddress}" }
-            count++
+            // THE ADDRESS IS SUPPLIED; THE HOSTNAME IS KEPT.
+            //
+            // `server` used to be overwritten with an IP literal. That worked on networks
+            // where DNS is blocked and broke REALITY, because the outbound then had no
+            // hostname of its own and the connection was pinned to one address that might not
+            // be the right server. Removing the rewrite fixed REALITY and broke the blocked
+            // case instead - the device could not resolve at all:
+            //
+            //     dns: lookup failed for <server>: read tcp ...->1.1.1.1:443: connection reset
+            //
+            // Pointing the outbound at a `hosts` transport gets both. The core is handed the
+            // answer, so nothing is looked up at connect time and no resolver has to be
+            // reachable; and `server` stays a hostname, so SNI, REALITY and retry-across-
+            // addresses all behave normally.
+            //
+            // It has to be per-outbound rather than a dns rule. route.default_domain_resolver
+            // pins outbound resolution to one transport and skips dns.rules entirely -
+            // dns/router.go:1277 takes `if options.Transport != nil` straight to client.Lookup
+            // - so a rule matching this hostname would never be consulted.
+            outbound.put(
+                "domain_resolver",
+                JSONObject()
+                    .put("server", HOSTS_DNS_TAG)
+                    .put("strategy", "prefer_ipv4"),
+            )
         }
-        return count
+
+        if (resolved.isNotEmpty()) injectHostsServer(root, resolved)
+        return resolved.size
+    }
+
+    /**
+     * Publish the resolved addresses as a `hosts` DNS server.
+     *
+     * sing-box's hosts transport takes a predefined map of name to addresses
+     * (option/dns.go:179) - a baked-in answer, with no query, no transport and no network
+     * behind it. That is what makes a connect possible on a network where every resolver the
+     * device can reach is blocked or lying.
+     *
+     * If the config carries no dns block, do nothing. Synthesising one here would paper over a
+     * config with larger problems, and every config this app generates has one.
+     */
+    private fun injectHostsServer(root: JSONObject, resolved: Map<String, List<InetAddress>>) {
+        val dns = root.optJSONObject("dns")
+        if (dns == null) {
+            NexusLog.w(TAG, "config has no dns block; skipping the hosts injection")
+            return
+        }
+
+        val predefined = JSONObject()
+        for ((host, addresses) in resolved) {
+            val list = JSONArray()
+            for (address in addresses) list.put(address.hostAddress)
+            predefined.put(host, list)
+        }
+
+        val hostsServer = JSONObject()
+            .put("type", "hosts")
+            .put("tag", HOSTS_DNS_TAG)
+            .put("predefined", predefined)
+
+        // Prepended rather than appended. Servers are selected by tag, not by order, so this
+        // is presentation only - it puts the baked-in answers at the top of the block someone
+        // reading a dumped config looks at first.
+        val existing = root.optJSONObject("dns")?.optJSONArray("servers")
+        val servers = JSONArray().put(hostsServer)
+        if (existing != null) {
+            for (i in 0 until existing.length()) servers.put(existing.get(i))
+        }
+        dns.put("servers", servers)
     }
 
     private fun isIpLiteral(host: String): Boolean =
@@ -341,17 +446,27 @@ internal object ConfigGuard {
      *
      * Rejecting instead means the user gets a sentence naming the problem.
      */
+    /**
+     * Why this address cannot be a real proxy server, or null if it can.
+     *
+     * Split out of assertUsableAddress because there are now two callers wanting different
+     * things from the same judgement: the resolver filters a list and carries on, while the
+     * rejection path below still wants the fully worded exception. One definition of
+     * "poisoned", two uses - rather than two definitions that drift.
+     */
+    private fun unusableReason(address: InetAddress): String? = when {
+        address.isLoopbackAddress -> "loopback"
+        address.isAnyLocalAddress -> "wildcard"
+        address.isLinkLocalAddress -> "link-local"
+        address.isMulticastAddress -> "multicast"
+        // A proxy server on a private address is not reachable from this device over the
+        // internet; the only way to get one back is interception.
+        address.isSiteLocalAddress -> "private (RFC1918)"
+        else -> null
+    }
+
     private fun assertUsableAddress(host: String, address: InetAddress) {
-        val reason = when {
-            address.isLoopbackAddress -> "loopback"
-            address.isAnyLocalAddress -> "wildcard"
-            address.isLinkLocalAddress -> "link-local"
-            address.isMulticastAddress -> "multicast"
-            // A proxy server on a private address is not reachable from this device over the
-            // internet; the only way to get one back is interception.
-            address.isSiteLocalAddress -> "private (RFC1918)"
-            else -> null
-        } ?: return
+        val reason = unusableReason(address) ?: return
 
         throw RejectedException(
             "DNS returned a $reason address for $host (${address.hostAddress}). " +

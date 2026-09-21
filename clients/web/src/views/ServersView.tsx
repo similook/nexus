@@ -226,6 +226,16 @@ export function ServersView({
               {totalNodes} Configs
             </span>
           </div>
+          {/*
+            Test All + Live share a group so the outer justify-between always sees exactly
+            TWO children.
+
+            Without this wrapper the Live button - which only renders while connected - became
+            a third child of a justify-between row, and the free space redistributed the moment
+            the tunnel came up: Test All slid to the centre and the header looked broken in the
+            connected state only.
+          */}
+          <div className="flex items-center gap-2">
           <button
             onClick={() => void handleTestAll()}
             disabled={testing}
@@ -246,6 +256,7 @@ export function ServersView({
               Live
             </button>
           )}
+          </div>
         </div>
 
         <button

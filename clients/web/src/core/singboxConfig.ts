@@ -156,10 +156,38 @@ function buildDns(serverHost: string) {
       // leaves unprotected, so it is DoH to an IP literal: no bootstrap lookup, port 443,
       // authenticated answer.
       //
-      // Largely belt-and-braces today because ConfigGuard pre-resolves outbound hostnames
-      // with Android's own resolver before the config reaches the core. Kept because that
-      // pre-resolution is an Android-side convenience, not a guarantee, and Apple has no
-      // equivalent yet.
+      // THIS IS A FALLBACK, AND ON A HOSTILE NETWORK IT IS NOT A GOOD ONE.
+      //
+      // The comment here used to say this was "largely belt-and-braces" because ConfigGuard
+      // pre-resolves outbound hostnames natively. That was true, which is precisely how it
+      // shipped broken: the moment pre-resolution stopped covering a node, this became the
+      // load-bearing path and the device reported
+      //
+      //   dns: lookup failed for <server>: read tcp ...->1.1.1.1:443: connection reset by peer
+      //
+      // DoH to 1.1.1.1 is reset outright on the networks this client is for. The real answer
+      // is that the address should never need looking up at connect time at all: ConfigGuard
+      // resolves it natively, checks it, and injects it as a `hosts` DNS server that the
+      // outbound points at through its own `domain_resolver`. See ConfigGuard.resolveOutboundServers.
+      //
+      // So this now only fires where that did not happen - a platform with no ConfigGuard
+      // (Apple, desktop), or a native lookup that failed outright.
+      //
+      // NO `detour` HERE. IT DOES NOT MEAN WHAT IT LOOKS LIKE IT MEANS.
+      //
+      // `detour: 'direct'` was added here on the reasoning that this query must never be
+      // routed through the proxy it is trying to find. sing-box refuses it outright:
+      //
+      //   start dns/https[dns-direct]: detour to an empty direct outbound makes no sense
+      //
+      // A detour names an outbound to dial THROUGH. Our `direct` outbound has no server - it
+      // is the plain "just connect" outbound - so detouring to it is a no-op the core treats
+      // as a configuration mistake rather than ignoring. A DNS server with no detour already
+      // dials directly, which is the behaviour the detour was meant to guarantee.
+      //
+      // This failed at START, not at parse, so `libbox.CheckConfig` accepted it and every
+      // fixture in core/testdata passed - CheckConfig calls box.New and then Close, never
+      // Start. A config being valid is not the same as a config that runs.
       { type: 'https', tag: 'dns-direct', server: '1.1.1.1' },
     ],
     rules: [

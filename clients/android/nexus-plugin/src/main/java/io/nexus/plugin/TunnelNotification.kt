@@ -148,12 +148,22 @@ internal class TunnelNotification(context: Context) {
         val builder = NotificationCompat.Builder(appContext, CHANNEL_ID)
             // android.R.drawable.stat_sys_vpn_ic is a @hide framework resource — it exists
             // at runtime but is not part of the public SDK, so it does not compile. Ship our
-            // own silhouette instead (res/drawable/ic_stat_nexus.xml).
+            // own silhouette instead (res/drawable/ic_notification_nexus.xml).
+            //
+            // This was ic_stat_nexus, a generic shield-with-keyhole glyph carrying no Nexus
+            // branding. It is now the Nexus emblem, drawn from the same paths as the launcher
+            // icon and the Quick Settings tile. A DEDICATED drawable rather than the tile's:
+            // Android squeezes a status-bar icon smaller than a tile renders it, so the mark
+            // is simplified for the size - the core dot dropped, the nodes shrunk, the strokes
+            // heavier. See the comment in that file.
+            //
+            // It must stay a flat silhouette. Android repaints every non-transparent pixel in
+            // the system tint, so a full-colour launcher icon here comes out as a solid blob.
             //
             // R here resolves to io.nexus.app.R because the plugin currently lives in the app
             // module. If it is ever extracted into a library module the drawable moves with it
             // and this keeps working against the library's own R.
-            .setSmallIcon(io.nexus.app.R.drawable.ic_stat_nexus)
+            .setSmallIcon(io.nexus.app.R.drawable.ic_notification_nexus)
             .setContentTitle(state)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)

@@ -158,7 +158,7 @@ class NexusTileService : TileService() {
         val tile: Tile = qsTile ?: return
         tile.state = if (active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = LABEL
-        tile.icon = Icon.createWithResource(this, io.nexus.app.R.drawable.ic_stat_nexus)
+        tile.icon = Icon.createWithResource(this, io.nexus.app.R.drawable.ic_tile_nexus)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.subtitle = if (active) "Connected" else "Disconnected"
         }

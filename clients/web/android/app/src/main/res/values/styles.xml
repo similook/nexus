@@ -16,7 +16,27 @@
     </style>
 
 
+    <!--
+      The launch theme.
+
+      This used to be `android:background` pointing at @drawable/splash - the stock Capacitor
+      placeholder bitmap, which is what shipped as the app's splash on every cold start.
+
+      Theme.SplashScreen wants three things instead, and they are not interchangeable:
+
+        windowSplashScreenBackground   the colour behind the icon
+        windowSplashScreenAnimatedIcon the mark itself (API 31+ reads this directly; the
+                                       androidx compat library reads it below that)
+        postSplashScreenTheme          what the activity switches to once the splash is done -
+                                       without it the activity keeps the LAUNCH theme forever
+
+      android:windowBackground stays as well, covering API 22-30 where the compat path draws
+      the window background rather than a system splash.
+    -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/nexusSplashBackground</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:windowBackground">@drawable/splash_background</item>
     </style>
 </resources>

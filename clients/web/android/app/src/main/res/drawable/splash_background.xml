@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The pre-Android-12 splash.
+
+  From API 31 the system draws the splash itself from windowSplashScreenAnimatedIcon. Below
+  that, androidx's compat path draws the launch theme's window background instead - so this
+  layer-list exists to give API 22-30 the same navy-plus-emblem, rather than a bare colour.
+
+  It replaces the stock Capacitor splash.png, which was a 480x320 placeholder bitmap stretched
+  across every density bucket.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/nexusSplashBackground"/>
+    <item
+        android:drawable="@drawable/ic_splash_logo"
+        android:gravity="center"
+        android:width="180dp"
+        android:height="180dp"/>
+</layer-list>

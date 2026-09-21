@@ -282,10 +282,73 @@ Stated plainly, because finding these out after installing is worse:
   for the shipped stack.
 - **No split tunnelling UI.** The per-app allow/deny plumbing exists in `NexusVpnService` but
   nothing exposes it.
+- **REALITY servers enforcing a minimum client version above `1.8.1`** need a server-side
+  adjustment to interoperate with the pinned core. Resolved in testing; see below.
+
+### REALITY compatibility
+
+Nexus pins **sing-box v1.14.0**, whose REALITY client advertises client version **`1.8.1`**.
+The value is a compile-time constant in the core, not something Nexus configures.
+
+A REALITY server may enforce a **minimum client version**. Against a server whose minimum is
+higher than `1.8.1`, the handshake is not accepted, and the REALITY implementation forwards
+the client to its configured destination site instead of rejecting it outright. The client
+then completes an ordinary TLS handshake with that site, receives its certificate rather than
+a REALITY one, and reports `reality verification failed`.
+
+That symptom is misleading, which is the main reason it is documented here: the address
+resolves, TCP connects, the tunnel starts, and only the handshake check fails - so it reads
+like bad credentials rather than a version policy.
+
+**This was diagnosed and resolved during testing.** Lowering the server-side minimum client
+version to `1.8.1` and **restarting the server-side REALITY service** resolved it - the
+restart mattered, because saving the setting alone did not apply it to the running process.
+An isolated sing-box v1.14.0 client then passed the REALITY handshake and reached the VLESS
+layer, and the Android client connected and carried real traffic over a long continuous
+session.
+
+So this is a **client/server version compatibility constraint of the currently pinned
+sing-box**, not a fault in REALITY and not a limitation of Nexus's REALITY support, which
+works. A minimum client version is a legitimate server-side control; lowering it admits older
+REALITY clients generally, so it is a deployment decision rather than a recommendation this
+project makes. Updating the core to a sing-box release advertising a newer REALITY client
+version is the way to retire the constraint - a reviewed change under `CLAUDE.md`, not yet
+done.
 
 ---
 
 ## Changelog
+
+### v1.2.0
+
+Connection reliability and branding. Every item below was verified on a physical device
+(Android 16, arm64) against a live REALITY node unless noted.
+
+- **Transient "Connection failed" on resume is gone.** The status stream is deliberately
+  disconnected while the app is backgrounded - a backgrounded 1 Hz subscription is ~86,400
+  wakeups a day - and gRPC's cancellation of that stream was being rendered as a connection
+  error over a tunnel that never dropped. Only the client-initiated cancellation is filtered;
+  `Unavailable`, `DeadlineExceeded`, `EOF`, permission and config-rejection errors all still
+  surface. Observed 0 occurrences across 9 background/resume cycles, from ~90% before.
+- **Server switching no longer deadlocks the core.** Switching now stops the tunnel fully,
+  waits for the teardown to be confirmed, then starts the new one after a short cool-down,
+  with a countdown shown while it waits. This removes the `initialize cache-file: timeout`
+  that could leave a tunnel with no core behind it.
+- **A failed connect can be cancelled.** The connect button stays live while connecting and
+  aborts on tap, and a start that never completes now falls back on its own rather than
+  leaving the UI stuck.
+- **DNS: the proxy server's address no longer depends on a reachable resolver.** Addresses are
+  resolved natively, checked against the poisoned-answer guard, and supplied to the core as
+  pre-resolved data, so connecting does not require a working DNS path at connect time. The
+  hostname is preserved for SNI, which matters for REALITY.
+- **Fixed a generated-config error that prevented the core from starting.** A DNS server was
+  emitted with a detour to an empty outbound, which sing-box rejects at start - not at parse,
+  so config validation had accepted it.
+- **Notification status-bar icon** is now the Nexus emblem instead of a generic shield glyph.
+- **Quick Settings tile icon** is now the Nexus emblem.
+- **Splash screen** uses the Nexus logo instead of the stock placeholder.
+- **Servers tab header** no longer shifts its layout when connected.
+- **REALITY compatibility** documented above.
 
 ### v1.1.0
 
