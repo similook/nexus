@@ -319,6 +319,37 @@ done.
 
 ## Changelog
 
+### v1.3.1
+
+A single CSS change, fixing a foreground CPU cost that predates v1.3.0.
+
+- **The connected home screen no longer animates forever.** Two connected-state animations -
+  the ring around the connect button and the dot in the uptime pill - ran continuously for as
+  long as the tunnel was up and the screen was open. Each of them independently kept the
+  WebView compositing at 60 fps, and that frame loop, not any single element in it, was the
+  cost. Both are now limited to three iterations
+  (`[animation-iteration-count:3]`), so the connect feedback still plays for roughly the
+  first nine seconds and then the page goes quiet. Nothing moves, resizes or changes colour;
+  the ring and the dot are still drawn exactly as before.
+
+**Measured on the test device** - Samsung Galaxy A33 5G (SM-A336E), Android 16, arm64 -
+by sampling `utime+stime` from `/proc/<pid>/stat` over 40-45 s windows, as a percentage of a
+single CPU core:
+
+| Condition | Before | After |
+|---|---|---|
+| Foreground, connected | ~120% | ~12% |
+| Foreground, disconnected | ~0-1% | ~0-1% |
+| Backgrounded, connected | ~0-0.4% | ~0-0.4% |
+
+These are CPU figures from one device, not a `bench/` run, and they are not a battery
+measurement: the phone was on USB power throughout (which is why `bench/B-04` refuses to
+report energy in that state), so **no mAh or battery-percentage saving is claimed**. How much
+of this translates to other hardware is untested - the per-frame cost looked specific to this
+device's WebView and GPU stack.
+
+Everything in v1.3.0 is unchanged and still included.
+
 ### v1.3.0
 
 Adds a device-network indicator, and nothing else. Validated on a physical device

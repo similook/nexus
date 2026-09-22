@@ -139,7 +139,7 @@ export function HomeView({ node }: { node: ServerNode | null }) {
           {isConnected && (
             <>
               <span className="absolute w-60 h-60 rounded-full bg-brand-orange/10 blur-2xl" />
-              <span className="absolute w-52 h-52 rounded-full border-2 border-brand-orange/50 animate-pulse-ring" />
+              <span className="absolute w-52 h-52 rounded-full border-2 border-brand-orange/50 animate-pulse-ring [animation-iteration-count:3]" />
             </>
           )}
           {isBusy && (
@@ -204,7 +204,7 @@ export function HomeView({ node }: { node: ServerNode | null }) {
           {/* #uptime-container — hidden unless connected, as in the mockup */}
           {isConnected && (
             <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-surface-card border border-brand-border text-[11px] font-mono text-brand-orange">
-              <span className="w-1.5 h-1.5 rounded-full bg-brand-orange animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-orange animate-pulse [animation-iteration-count:3]" />
               <span>{formatUptime(uptimeSeconds)}</span>
             </div>
           )}
