@@ -1,4 +1,5 @@
 import { CapacitorHttp } from '@capacitor/core';
+import { NexusCore } from './plugin';
 import type { Protocol, ServerNode } from '../data/servers';
 import { buildConfig } from './singboxConfig';
 
@@ -39,9 +40,23 @@ export interface SubscriptionSource {
   url: string;
   /** Display name; defaults to the URL's host. */
   name?: string;
+  /** Fetch through the running tunnel rather than directly. See fetchSubscription. */
+  viaTunnel?: boolean;
 }
 
-export class SubscriptionError extends Error {}
+export class SubscriptionError extends Error {
+  /**
+   * @param network true only when there was no HTTP answer at all - unreachable, offline, DNS,
+   *   timed out. An error status or bad content is an answer: the network works. The one
+   *   automatic retry (useAutoRefresh.ts) keys off exactly this.
+   */
+  constructor(
+    message: string,
+    readonly network = false,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * Quota/expiry reported by the panel in the Subscription-Userinfo response header.
@@ -112,28 +127,40 @@ export interface FetchResult {
   userinfo: SubscriptionUserinfo | null;
 }
 
-export async function fetchSubscription(url: string): Promise<FetchResult> {
+/**
+ * @param viaTunnel fetch through the running Nexus tunnel instead of directly - for a panel that
+ *   is only reachable through it (see NexusCorePlugin.fetchViaTunnel). Direct is the default and
+ *   what every manual Update uses.
+ */
+export async function fetchSubscription(url: string, viaTunnel = false): Promise<FetchResult> {
   const trimmed = url.trim();
   if (!/^https?:\/\//i.test(trimmed)) {
     throw new SubscriptionError('Link must start with http:// or https://');
   }
 
+  // Some panels serve a different (or no) payload without a recognised client UA.
+  const userAgent = 'Nexus/0.1 (sing-box)';
+
   let response;
   try {
-    response = await CapacitorHttp.get({
-      url: trimmed,
-      headers: {
-        // Some panels serve a different (or no) payload without a recognised client UA.
-        'User-Agent': 'Nexus/0.1 (sing-box)',
-        Accept: '*/*',
-      },
-      connectTimeout: 15000,
-      readTimeout: 15000,
-      responseType: 'text',
-    });
+    if (viaTunnel) {
+      response = await NexusCore.fetchViaTunnel({ url: trimmed, headers: { 'User-Agent': userAgent } });
+    } else {
+      response = await CapacitorHttp.get({
+        url: trimmed,
+        headers: {
+          'User-Agent': userAgent,
+          Accept: '*/*',
+        },
+        connectTimeout: 15000,
+        readTimeout: 15000,
+        responseType: 'text',
+      });
+    }
   } catch (e) {
     throw new SubscriptionError(
       `Could not reach the server: ${e instanceof Error ? e.message : String(e)}`,
+      true,
     );
   }
 
@@ -887,7 +914,7 @@ export function rebuildNodeConfig(node: ServerNode): ServerNode {
 export async function importSubscription(
   source: SubscriptionSource,
 ): Promise<ParseResult & { name: string; userinfo: SubscriptionUserinfo | null }> {
-  const { body, userinfo } = await fetchSubscription(source.url);
+  const { body, userinfo } = await fetchSubscription(source.url, source.viaTunnel);
   const sourceId = `sub-${hashString(source.url)}`;
   const result = parseSubscription(body, sourceId);
 

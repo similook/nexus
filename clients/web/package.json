@@ -1,7 +1,7 @@
 {
   "name": "nexus-web",
   "private": true,
-  "version": "1.3.1",
+  "version": "1.3.2",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "cap:sync": "npm run build && cap sync",
-    "check-parsers": "npx --yes tsx scripts/check-parsers.mts"
+    "check-parsers": "npx --yes tsx scripts/check-parsers.mts",
+    "check-auto-refresh": "npx --yes tsx scripts/check-auto-refresh.mts",
+    "check-update": "npx --yes tsx scripts/check-update.mts"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

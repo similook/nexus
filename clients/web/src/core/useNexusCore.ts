@@ -51,6 +51,15 @@ export interface NexusState {
 }
 
 export interface NexusApi extends NexusState {
+  /**
+   * The config of the tunnel THIS app started and the core confirmed, or null when unknown.
+   *
+   * Null is deliberate whenever the app cannot vouch for what is running: nothing is, or the
+   * tunnel was started elsewhere (the Quick Settings tile replays the last connected config,
+   * which need not be the selected node). Anything that attributes a live measurement to a node
+   * must use this, never the selection - the two diverge.
+   */
+  activeConfig: string | null;
   connect: (config: string) => Promise<void>;
   disconnect: () => Promise<void>;
   /** Single toggle for a one-button UI. Ignores taps while a transition is in flight. */
@@ -164,6 +173,14 @@ const INITIAL: NexusState = {
 export function useNexusCore(): NexusApi {
   const [state, setState] = useState<NexusState>(INITIAL);
   const [history, setHistory] = useState<number[]>([]);
+
+  /**
+   * See NexusApi.activeConfig. It is set only by the 'started' that answers OUR connect() -
+   * pendingConfigRef carries the config across that gap - and cleared by any confirmed stop. A
+   * 'started' nobody here asked for (the tile, a resume re-attaching) never names a config.
+   */
+  const [activeConfig, setActiveConfig] = useState<string | null>(null);
+  const pendingConfigRef = useRef<string | null>(null);
 
   /**
    * Origin for the uptime clock, on the performance.now() timeline.
@@ -349,6 +366,15 @@ export function useNexusCore(): NexusApi {
     // history it is about to resume displaying.
     if (serviceState === 'stopped') setHistory([]);
 
+    // Which config is running, when we can vouch for it (NexusApi.activeConfig).
+    if (serviceState === 'started' && pendingConfigRef.current !== null) {
+      setActiveConfig(pendingConfigRef.current);
+      pendingConfigRef.current = null;
+    } else if (serviceState === 'stopped') {
+      setActiveConfig(null);
+      pendingConfigRef.current = null;
+    }
+
     // Record the teardown for switchTo, regardless of what the UI was told to render.
     if (serviceState === 'stopped') stopConfirmedRef.current = true;
 
@@ -484,6 +510,7 @@ export function useNexusCore(): NexusApi {
     async (config: string, name?: string) => {
       if (transitionRef.current) return;
       transitionRef.current = true;
+      pendingConfigRef.current = config;
 
       setState((prev) => ({ ...prev, connection: 'connecting', error: null }));
 
@@ -498,6 +525,7 @@ export function useNexusCore(): NexusApi {
         watchdogRef.current = null;
         switchingRef.current = false;
         connectedAtRef.current = null;
+        pendingConfigRef.current = null;
         // Stop whatever half-started, so the core is not left running behind a UI that has
         // given up on it. Failures here are expected - there may be nothing to stop.
         void Promise.resolve(NexusCore.stop()).catch(() => {});
@@ -519,6 +547,7 @@ export function useNexusCore(): NexusApi {
       } catch (e) {
         clearWatchdog();
         switchingRef.current = false;
+        pendingConfigRef.current = null;
         const message = e instanceof Error ? e.message : String(e);
         const denied = /permission denied/i.test(message);
         connectedAtRef.current = null;
@@ -680,5 +709,5 @@ export function useNexusCore(): NexusApi {
     return lines;
   }, []);
 
-  return { ...state, connect, disconnect, toggle, switchTo, readLogs, history };
+  return { ...state, activeConfig, connect, disconnect, toggle, switchTo, readLogs, history };
 }

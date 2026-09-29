@@ -1,6 +1,7 @@
 import { WebPlugin } from '@capacitor/core';
 import type {
   ClashModeEvent,
+  InstallInfo,
   NetworkStatusEvent,
   NexusCorePlugin,
   ServiceState,
@@ -81,7 +82,18 @@ export class NexusCoreWeb extends WebPlugin implements NexusCorePlugin {
     // plausible number, which would make the web build lie about something measurable.
     return { results: options.targets.map((t) => ({ id: t.id, ms: -1 })) };
   }
+  async fetchViaTunnel(_options: {
+    url: string;
+    headers?: Record<string, string>;
+  }): Promise<{ status: number; data: string; headers: Record<string, string> }> {
+    // There is no tunnel in the browser. Rejecting is the "no answer" case, which is true.
+    throw new Error('No tunnel in the browser');
+  }
   async closeConnections(): Promise<void> {}
+  async getInstallInfo(): Promise<InstallInfo> {
+    // Nothing is installed in a browser, so there is nothing to update: the check fails closed.
+    throw new Error('Not installed in the browser');
+  }
 
   async setClashMode(options: { mode: string }): Promise<void> {
     const event: ClashModeEvent = { current: options.mode };

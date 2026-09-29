@@ -2,9 +2,12 @@ package io.nexus.plugin
 
 import android.Manifest
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.os.Build
 import android.net.ConnectivityManager
 import android.net.Network
@@ -58,6 +61,7 @@ class NexusPlugin : Plugin() {
      */
     private val networkMonitor = NetworkStatusMonitor()
 
+    @Volatile
     private var statusClient: CommandClient? = null
     private var groupsClient: CommandClient? = null
 
@@ -128,6 +132,44 @@ class NexusPlugin : Plugin() {
      */
     @Volatile
     private var intendedRunning: Boolean = false
+
+    /**
+     * What the core itself last reported (NexusVpnService.announce): running, stopped, or null
+     * for "not heard since this process started, or since we asked for a change".
+     *
+     * AUTHORITATIVE where known, because it is the tunnel's own word whoever started or stopped
+     * it. `intendedRunning` only knows what THIS process asked for, and the tile, the
+     * notification's Disconnect and another VPN revoking ours all act without asking - which is
+     * how the UI came to show "Connected" with a running timer over a tunnel that was gone.
+     */
+    @Volatile
+    private var coreRunning: Boolean? = null
+
+    /** The WebView is resumed. Streams attach only while it is (R1). */
+    @Volatile
+    private var uiVisible: Boolean = false
+
+    private val tunnelStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                NexusVpnService.ACTION_TUNNEL_STATE -> onTunnelState(
+                    intent.getBooleanExtra(NexusVpnService.EXTRA_RUNNING, false),
+                    intent.getStringExtra(NexusVpnService.EXTRA_REASON),
+                )
+                NexusVpnService.ACTION_FETCH_RESULT -> {
+                    val id = intent.getStringExtra(NexusVpnService.EXTRA_REQUEST_ID) ?: return
+                    val result = intent.getStringExtra(NexusVpnService.EXTRA_RESULT)
+                    val error = intent.getStringExtra(NexusVpnService.EXTRA_ERROR)
+                    post { finishFetch(id, result, error) }
+                }
+            }
+        }
+    }
+
+    /** fetchViaTunnel calls waiting for the core's answer, by request id. */
+    private class PendingFetch(val call: PluginCall, val body: java.io.File, val timeout: ScheduledFuture<*>?)
+
+    private val pendingFetches = java.util.concurrent.ConcurrentHashMap<String, PendingFetch>()
 
     /** Cached so a status tick that changed nothing does not cross the bridge at all. */
     private var lastStatusSignature: String? = null
@@ -207,6 +249,49 @@ class NexusPlugin : Plugin() {
             )
             NexusLog.d(TAG) { "libbox setup (app process), basePath=${context.filesDir.absolutePath}" }
         }.onFailure { NexusLog.e(TAG, "libbox setup failed in app process", it) }
+
+        // For the plugin's whole life, not just while visible: a tunnel stopped while the app is
+        // in the background must be known on return, not rediscovered by a two-minute probe.
+        // Costs nothing between transitions - the core sends one per start and stop.
+        runCatching {
+            ContextCompat.registerReceiver(
+                context.applicationContext,
+                tunnelStateReceiver,
+                IntentFilter(NexusVpnService.ACTION_TUNNEL_STATE).apply {
+                    addAction(NexusVpnService.ACTION_FETCH_RESULT)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }.onFailure { NexusLog.w(TAG, "could not register the tunnel-state receiver: ${it.message}") }
+    }
+
+    /**
+     * The core started or stopped a tunnel - whoever asked for it. Main thread.
+     *
+     * Started: the UI is told at once, and the status stream attaches if the WebView is visible,
+     * so a tunnel the Quick Settings tile brought up shows as connected without reopening the app.
+     *
+     * Stopped: WE end the status stream before the core does. The stream ending under a stopping
+     * core reads as a transport error the UI would paint red; ending it ourselves makes it the
+     * cancellation the UI already treats as nothing. The UI hears a clean "stopped" - with a
+     * reason only when a start failed.
+     */
+    private fun onTunnelState(running: Boolean, reason: String?) {
+        NexusLog.i(TAG, "core reports the tunnel ${if (running) "running" else "stopped"}")
+        if (running) {
+            coreRunning = true
+            intendedRunning = true
+            notifyListeners("serviceState", JSObject().put("state", "started"))
+            if (uiVisible) post { if (!connectStatusClient()) scheduleStatusProbe() }
+            return
+        }
+
+        coreRunning = false
+        intendedRunning = false
+        disconnectClients()
+        val event = JSObject().put("state", "stopped")
+        if (!reason.isNullOrEmpty()) event.put("reason", reason)
+        notifyListeners("serviceState", event)
     }
 
     @PluginMethod
@@ -276,6 +361,8 @@ class NexusPlugin : Plugin() {
             .putExtra(NexusVpnService.EXTRA_CONFIG, config)
             .putExtra(NexusVpnService.EXTRA_NODE_NAME, nodeName)
         intendedRunning = true
+        // A new start is in flight; the last report no longer describes what is coming.
+        coreRunning = null
         context.startForegroundService(intent)
 
         // The socket does not exist yet; this waits for it.
@@ -285,6 +372,8 @@ class NexusPlugin : Plugin() {
     @PluginMethod
     fun stop(call: PluginCall) {
         intendedRunning = false
+        // Unknown until the core confirms; a stale "running" must not answer getStatus meanwhile.
+        coreRunning = null
         disconnectClients()
         context.startService(
             Intent(context, NexusVpnService::class.java)
@@ -456,6 +545,111 @@ class NexusPlugin : Plugin() {
         }
     }
 
+    /**
+     * GET a URL through the running tunnel: `{ status, data, headers }`, or a rejection when there
+     * was no HTTP answer at all (not connected, unreachable, timed out).
+     *
+     * This process's own requests bypass the VPN (openTun puts the package on the deny list), so
+     * for a host reachable only through the tunnel the CORE fetches it - NexusVpnService
+     * .fetchViaTunnel, over its running proxy outbound - and hands the body back through a file in
+     * this app's cache dir. Used once per launch at most, for the subscription retry
+     * (useAutoRefresh.ts); never on a timer.
+     */
+    @PluginMethod
+    fun fetchViaTunnel(call: PluginCall) {
+        val url = call.getString("url")
+        if (url.isNullOrBlank() || !(url.startsWith("https://", true) || url.startsWith("http://", true))) {
+            call.reject("url must be http:// or https://")
+            return
+        }
+        val userAgent = runCatching { call.getObject("headers")?.getString("User-Agent") }.getOrNull() ?: ""
+        val id = java.util.UUID.randomUUID().toString()
+        val body = java.io.File(context.cacheDir, "tunnel-fetch-$id")
+
+        val timeout = runCatching {
+            io.schedule({ finishFetch(id, null, "no answer from the core") }, FETCH_WAIT_MS, TimeUnit.MILLISECONDS)
+        }.getOrNull()
+        pendingFetches[id] = PendingFetch(call, body, timeout)
+
+        runCatching {
+            context.startService(
+                Intent(context, NexusVpnService::class.java)
+                    .setAction(NexusVpnService.ACTION_FETCH_VIA_TUNNEL)
+                    .putExtra(NexusVpnService.EXTRA_REQUEST_ID, id)
+                    .putExtra(NexusVpnService.EXTRA_URL, url)
+                    .putExtra(NexusVpnService.EXTRA_USER_AGENT, userAgent)
+                    .putExtra(NexusVpnService.EXTRA_BODY_PATH, body.absolutePath)
+            )
+        }.onFailure { post { finishFetch(id, null, it.message ?: "could not reach the core") } }
+    }
+
+    /** Complete a fetchViaTunnel call exactly once. MUST run on [io]. */
+    private fun finishFetch(id: String, result: String?, error: String?) {
+        val pending = pendingFetches.remove(id) ?: return
+        pending.timeout?.cancel(false)
+        try {
+            if (result == null) {
+                pending.call.reject(error ?: "fetch failed")
+                return
+            }
+            val answer = org.json.JSONObject(result)
+            val headers = JSObject()
+            answer.optJSONObject("headers")?.let { json ->
+                for (key in json.keys()) headers.put(key, json.optString(key))
+            }
+            pending.call.resolve(
+                JSObject()
+                    .put("status", answer.optInt("status"))
+                    .put("data", pending.body.readText(Charsets.UTF_8))
+                    .put("headers", headers)
+            )
+        } catch (e: Exception) {
+            pending.call.reject(e.message ?: "could not read the answer")
+        } finally {
+            runCatching { pending.body.delete() }
+        }
+    }
+
+    /**
+     * Read-only facts about this install for the update check (update.ts): its version, which
+     * package installed it - a Play install is updated by Play, never pointed at a GitHub APK -
+     * and what the device can run. Nothing here leaves the device.
+     */
+    @PluginMethod
+    fun getInstallInfo(call: PluginCall) {
+        try {
+            val pm = context.packageManager
+            val pkg = context.packageName
+            @Suppress("DEPRECATION")
+            val info = pm.getPackageInfo(pkg, 0)
+            val versionCode = if (Build.VERSION.SDK_INT >= 28) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+            val installer = runCatching {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    pm.getInstallSourceInfo(pkg).installingPackageName
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getInstallerPackageName(pkg)
+                }
+            }.getOrNull()
+            call.resolve(
+                JSObject()
+                    .put("packageName", pkg)
+                    .put("versionCode", versionCode)
+                    .put("versionName", info.versionName ?: "")
+                    .put("installer", installer ?: "")
+                    .put("sdkInt", Build.VERSION.SDK_INT)
+                    .put("abis", JSArray(Build.SUPPORTED_ABIS.toList()))
+            )
+        } catch (e: Exception) {
+            call.reject(e.message ?: "install info unavailable")
+        }
+    }
+
     /** Milliseconds to complete a TCP handshake, or -1 if it did not complete. */
     private fun measure(server: String, port: Int): Int {
         val startedAt = System.nanoTime()
@@ -545,10 +739,17 @@ class NexusPlugin : Plugin() {
         // reattaching after a resume: we asked for a tunnel, nobody asked to stop it, and we
         // cannot yet confirm either way. The UI must hold its current state rather than
         // treating an unconfirmed reading as a disconnect.
-        val state = when {
-            statusClient != null -> "started"
-            intendedRunning -> "unknown"
-            else -> "stopped"
+        //
+        // The core's own report comes first when there is one: it is right even for a tunnel this
+        // process neither started nor stopped.
+        val state = when (coreRunning) {
+            false -> "stopped"
+            true -> "started"
+            null -> when {
+                statusClient != null -> "started"
+                intendedRunning -> "unknown"
+                else -> "stopped"
+            }
         }
         val result = JSObject()
             .put("state", state)
@@ -622,6 +823,7 @@ class NexusPlugin : Plugin() {
 
     override fun handleOnResume() {
         super.handleOnResume()
+        uiVisible = true
         setUIForeground(true)
         networkMonitor.start()
         if (intendedRunning) {
@@ -635,6 +837,7 @@ class NexusPlugin : Plugin() {
 
     override fun handleOnPause() {
         super.handleOnPause()
+        uiVisible = false
         cancelStatusProbe()
         networkMonitor.stop()
         // Not a throttle, not a filter: we DISCONNECT. A backgrounded WebView that keeps a
@@ -645,6 +848,7 @@ class NexusPlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
+        runCatching { context.applicationContext.unregisterReceiver(tunnelStateReceiver) }
         disconnectClients()
         // shutdown(), not shutdownNow(): disconnectClients just queued the actual closes on
         // [io], and shutdownNow would interrupt them mid-RPC. The executor is daemon-threaded,
@@ -690,7 +894,9 @@ class NexusPlugin : Plugin() {
         }
 
         // CHANGED IN 1.14: a real constructor, not Libbox.newCommandClient().
-        val client = CommandClient(StatusHandler(), options)
+        val handler = StatusHandler()
+        val client = CommandClient(handler, options)
+        handler.client = client
         return try {
             client.connect()
             statusClient = client
@@ -758,6 +964,28 @@ class NexusPlugin : Plugin() {
     }
 
     /**
+     * A status stream ended that nobody ended. MUST run on [io].
+     *
+     * Two causes look identical from here: the core went away without announcing it (it died),
+     * or the stream broke while the core lives on. One re-attach tells them apart - bounded by
+     * libbox's own dial retry (~3 s), not a loop. Meanwhile the UI holds, and a stop announced in
+     * that window settles it cleanly instead.
+     */
+    private fun settleLostStream(reason: String) {
+        if (coreRunning == false) return
+        // Hidden: nothing may stream now (R1). Resume re-attaches, or its probe reports the loss.
+        if (!uiVisible) return
+        if (connectStatusClient()) return
+        if (coreRunning == false) return
+
+        // Gone, and never announced: the core died. That is worth showing, as it always was.
+        NexusLog.w(TAG, "status stream lost and the core is unreachable: $reason")
+        coreRunning = false
+        intendedRunning = false
+        notifyListeners("serviceState", JSObject().put("state", "stopped").put("reason", reason))
+    }
+
+    /**
      * Tear every command stream down.
      *
      * THE DISCONNECTS RUN ON [io], NOT HERE. CommandClient.disconnect() is a blocking gRPC
@@ -793,16 +1021,41 @@ class NexusPlugin : Plugin() {
      */
     private inner class StatusHandler : CommandClientHandler {
 
+        /** The client this handler serves. Set right after construction, before connect(). */
+        @Volatile
+        var client: CommandClient? = null
+
         override fun connected() {
             notifyListeners("serviceState", JSObject().put("state", "started"))
         }
 
         override fun disconnected(message: String?) {
             lastStatusSignature = null
-            notifyListeners(
-                "serviceState",
-                JSObject().put("state", "stopped").put("reason", message ?: "")
-            )
+            val reason = message ?: ""
+
+            // The core announced its stop, and the UI heard it from onTunnelState. The stream
+            // ending is the consequence, not news - and forwarding its transport error is exactly
+            // the red "Connection failed" a clean stop must not show.
+            if (coreRunning == false) return
+
+            // A stream WE ended: disconnectClients() drops the reference before disconnecting, so
+            // it is never the current one. Unchanged - the UI's lifecycle-cancel guard turns the
+            // cancellation into "hold".
+            if (statusClient !== client) {
+                notifyListeners(
+                    "serviceState",
+                    JSObject().put("state", "stopped").put("reason", reason)
+                )
+                return
+            }
+
+            // It died on its own and the core has not said why. The reference is dead: keeping it
+            // made getStatus() answer "started" and blocked every re-attach. Hold the UI and look
+            // once more - see settleLostStream.
+            statusClient = null
+            coreStartedAt = 0L
+            notifyListeners("serviceState", JSObject().put("state", "unknown"))
+            post { settleLostStream(reason) }
         }
 
         override fun writeStatus(message: StatusMessage) {
@@ -1256,6 +1509,9 @@ class NexusPlugin : Plugin() {
         // Per-endpoint TCP handshake budget. Above ~3s a node is unusable in practice, and a
         // longer wait only makes the whole batch feel broken.
         const val TCP_PING_TIMEOUT_MS = 3_000L
+
+        /** How long fetchViaTunnel waits for the core: its own 30 s fetch timeout plus margin. */
+        const val FETCH_WAIT_MS = 40_000L
 
         // Concurrency for a batch test. Enough that a 30-node subscription finishes in a
         // couple of seconds; low enough not to open thirty sockets at once on a phone radio.

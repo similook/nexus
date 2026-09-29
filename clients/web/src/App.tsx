@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { BottomNav, type Tab } from './components/BottomNav';
 import { ToastProvider, useToast } from './components/Toast';
 import { NexusProvider, useNexus } from './core/NexusProvider';
+import { useAutoRefresh } from './core/useAutoRefresh';
 import { useSubscriptions } from './core/useSubscriptions';
 import { loadSelection, saveSelection } from './core/selection';
 import { protocolOf, type ServerNode } from './data/servers';
@@ -36,6 +37,9 @@ function Shell() {
   // Home tab has to keep rendering it after ServersView unmounts.
   const subs = useSubscriptions();
   const { connection, switchTo } = useNexus();
+
+  // One refresh per launch, plus at most one retry through the tunnel. See useAutoRefresh.ts.
+  useAutoRefresh(subs, connection);
 
   // Shell renders inside ToastProvider, so this is legal here and would not be in App().
   const toast = useToast();

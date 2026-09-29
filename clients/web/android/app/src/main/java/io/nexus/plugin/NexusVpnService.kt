@@ -46,11 +46,32 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
     private val starter: ExecutorService = Executors.newSingleThreadExecutor { r ->
         Thread(r, "nexus-start").apply { isDaemon = true }
     }
+
+    /**
+     * Fetches through the tunnel (see [fetchViaTunnel]). Not [starter]: a slow download must never
+     * hold up a start or a stop queued behind it.
+     */
+    private val fetcher: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "nexus-fetch").apply { isDaemon = true }
+    }
     private var tunFd: ParcelFileDescriptor? = null
 
     /** Guards against a double teardown - requestStop() can race onDestroy(). */
     private val stopping = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var notification: TunnelNotification
+
+    /**
+     * Why the last start failed, carried to the stop that follows it (see [announce]).
+     *
+     * `@Volatile`: set on [starter] by failStart, read by stop(), which can run on the main
+     * thread via onDestroy.
+     */
+    @Volatile
+    private var failureReason: String? = null
+
+    /** The last state [announce] sent, so a clean stop cannot overwrite a failure's reason. */
+    @Volatile
+    private var announcedRunning: Boolean? = null
 
     private val powerReceiver = PowerReceiver(
         onScreenOn = { on -> service.get()?.setScreenOn(on) },
@@ -168,8 +189,55 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                 service.get()?.setUIForeground(intent.getBooleanExtra(EXTRA_FOREGROUND, false))
                 return START_STICKY
             }
+
+            ACTION_FETCH_VIA_TUNNEL -> {
+                fetchViaTunnel(intent)
+                return START_STICKY
+            }
         }
         return START_STICKY
+    }
+
+    /**
+     * GET a URL through the running tunnel for the app process, and answer with a broadcast.
+     *
+     * The app's own traffic bypasses this VPN (its package is on the deny list in openTun), so the
+     * app cannot reach a host that only the tunnel reaches - a subscription panel blocked on the
+     * direct path. The core can: nexuscore.FetchViaTunnel dials through the running proxy
+     * outbound. Nothing listens anywhere; only this app can send the request (the service is not
+     * exported) or read the answer (package-scoped broadcast, body in the app's own cache dir).
+     */
+    private fun fetchViaTunnel(intent: Intent) {
+        val requestId = intent.getStringExtra(EXTRA_REQUEST_ID) ?: return
+        val url = intent.getStringExtra(EXTRA_URL)
+        val userAgent = intent.getStringExtra(EXTRA_USER_AGENT) ?: ""
+        val bodyPath = intent.getStringExtra(EXTRA_BODY_PATH)
+
+        fetcher.execute {
+            var result: String? = null
+            var error: String? = null
+            try {
+                val core = service.get() ?: throw IllegalStateException("Nexus is not connected")
+                require(!url.isNullOrBlank()) { "no URL" }
+                // The body goes to the app's cache dir and nowhere else, whatever the path says.
+                val body = java.io.File(bodyPath ?: "").canonicalFile
+                require(body.startsWith(cacheDir.canonicalFile)) { "body path outside the cache dir" }
+                result = core.fetchViaTunnel(url, userAgent, FETCH_TIMEOUT_MS, body.path)
+            } catch (e: Exception) {
+                error = e.message ?: e.javaClass.simpleName
+            }
+            runCatching {
+                sendBroadcast(
+                    Intent(ACTION_FETCH_RESULT)
+                        .setPackage(packageName)
+                        .putExtra(EXTRA_REQUEST_ID, requestId)
+                        .apply {
+                            result?.let { putExtra(EXTRA_RESULT, it) }
+                            error?.let { putExtra(EXTRA_ERROR, it) }
+                        },
+                )
+            }
+        }
     }
 
     private fun start(config: String, nodeName: String? = null) {
@@ -243,6 +311,10 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
      */
     private fun failStart(message: String) {
         NexusLog.e(TAG, "start failed: $message")
+        // Told to the app now, not when onDestroy gets round to stop(): the service may stay
+        // bound for a while, and the app's connect is waiting on an answer.
+        failureReason = message
+        announce(false, message)
         closeCore()
         runCatching { notification.showError(message) }
         runCatching { notification.detachForeground(this) }
@@ -286,6 +358,7 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                 notification.showConnected(serverLabel(nodeName, guardedForReload))
                 rememberForRelaunch(guardedForReload, nodeName)
                 NexusLog.i(TAG, "swapped config via reload")
+                announce(true, null)
                 return
             } catch (e: Exception) {
                 NexusLog.w(TAG, "reload failed, falling back to a full restart: ${e.message}")
@@ -358,9 +431,11 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
 
         service.set(created)
         stopping.set(false)
+        failureReason = null
         isRunning = true
         rememberForRelaunch(guarded, nodeName)
         notifyTileStateChanged()
+        announce(true, null)
 
         // Register AFTER the core exists — PowerReceiver.register() seeds the initial screen
         // and Doze state immediately, and that seed has to land on a live service. Starting
@@ -433,6 +508,34 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
     }
 
     /**
+     * Tell the app process what the tunnel is doing.
+     *
+     * The app cannot read [isRunning] - it lives in this process - so a tunnel started or stopped
+     * here (the tile, the notification's Disconnect, another VPN revoking ours) left the UI
+     * believing whatever it had last asked for: "Connected" with a running timer over a tunnel
+     * that was gone, or "Disconnected" over one the tile had just started.
+     *
+     * Package-scoped, and the plugin registers its receiver not-exported, so nothing outside this
+     * app can read or forge one. Sent BEFORE teardown on a stop, so the app hears the reason for
+     * the status stream ending before the stream ends.
+     *
+     * A failure's reason is never overwritten: once `false` has gone out, the clean stop that
+     * follows failStart does not send a second one that would clear the error on screen.
+     */
+    private fun announce(running: Boolean, reason: String?) {
+        if (!running && announcedRunning == false) return
+        announcedRunning = running
+        runCatching {
+            sendBroadcast(
+                Intent(ACTION_TUNNEL_STATE)
+                    .setPackage(packageName)
+                    .putExtra(EXTRA_RUNNING, running)
+                    .apply { if (!reason.isNullOrEmpty()) putExtra(EXTRA_REASON, reason) },
+            )
+        }.onFailure { NexusLog.w(TAG, "could not announce tunnel state: ${it.message}") }
+    }
+
+    /**
      * Ask the system to re-read the tile's state.
      *
      * Called on every transition, wherever it came from - the app, the notification, or the
@@ -484,6 +587,8 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
 
         isRunning = false
         notifyTileStateChanged()
+        announce(false, failureReason)
+        failureReason = null
 
         powerReceiver.unregister(this)
         unregisterNetworkCallback()
@@ -884,6 +989,25 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         const val ACTION_RELOAD = "io.nexus.plugin.RELOAD"
         const val ACTION_UI_FOREGROUND = "io.nexus.plugin.UI_FOREGROUND"
         const val EXTRA_CONFIG = "config"
+
+        /** Broadcast to the app process on every start and stop. See [announce]. */
+        const val ACTION_TUNNEL_STATE = "io.nexus.plugin.TUNNEL_STATE"
+        const val EXTRA_RUNNING = "running"
+        /** Present only when a start failed; a clean stop carries none. */
+        const val EXTRA_REASON = "reason"
+
+        /** A GET through the tunnel, for the app process. See [fetchViaTunnel]. */
+        const val ACTION_FETCH_VIA_TUNNEL = "io.nexus.plugin.FETCH_VIA_TUNNEL"
+        /** Its answer, package-scoped: EXTRA_REQUEST_ID plus EXTRA_RESULT or EXTRA_ERROR. */
+        const val ACTION_FETCH_RESULT = "io.nexus.plugin.FETCH_RESULT"
+        const val EXTRA_REQUEST_ID = "requestId"
+        const val EXTRA_URL = "url"
+        const val EXTRA_USER_AGENT = "userAgent"
+        const val EXTRA_BODY_PATH = "bodyPath"
+        /** JSON from nexuscore.FetchViaTunnel: status and response headers. */
+        const val EXTRA_RESULT = "result"
+        const val EXTRA_ERROR = "error"
+        private const val FETCH_TIMEOUT_MS = 30_000L
 
         /**
          * Display name of the node, for the notification body.

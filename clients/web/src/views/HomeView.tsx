@@ -2,6 +2,7 @@ import { useNexus } from '../core/NexusProvider';
 import { formatSpeedMB, formatTotal, formatUptime } from '../core/format';
 import { isQuicProtocol, type ServerNode } from '../data/servers';
 import { AdBanner } from '../components/AdBanner';
+import { UpdateBanner } from '../components/UpdateBanner';
 import { useLivePing } from '../core/useLivePing';
 import { useNetworkStatus } from '../core/useNetworkStatus';
 import type { NetworkStatusState, NetworkTransport } from '../core/plugin';
@@ -69,6 +70,9 @@ export function HomeView({ node }: { node: ServerNode | null }) {
 
   return (
     <section id="view-home" role="tabpanel" className="h-full min-h-0 flex flex-col px-5 pt-3 pb-4 overflow-y-auto custom-scroll">
+      {/* Renders nothing unless a signed manifest offers a newer version — see UpdateBanner. */}
+      <UpdateBanner />
+
       {/* Active node card */}
       <div className="shrink-0 flex items-center justify-between gap-2 p-3 rounded-2xl bg-brand-surface border border-brand-border mb-4">
         <div className="flex items-center gap-2.5 min-w-0">

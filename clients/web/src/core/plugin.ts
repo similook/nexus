@@ -106,6 +106,18 @@ export interface NetworkStatusEvent {
   transport: NetworkTransport;
 }
 
+/** Facts about THIS install, for the update check (update.ts). */
+export interface InstallInfo {
+  packageName: string;
+  versionCode: number;
+  versionName: string;
+  /** Package that installed the app: 'com.android.vending' for Play, '' when unknown. */
+  installer: string;
+  sdkInt: number;
+  /** Build.SUPPORTED_ABIS, most preferred first. */
+  abis: string[];
+}
+
 /** getStatus() returns the service state plus the last known status, if any. */
 export type StatusSnapshot = Partial<StatusMessage> & {
   state: ServiceState;
@@ -206,8 +218,25 @@ export interface NexusCorePlugin {
   tcpPing(options: {
     targets: Array<{ id: string; server: string; port: number }>;
   }): Promise<{ results: Array<{ id: string; ms: number }> }>;
+
+  /**
+   * GET a URL THROUGH the running tunnel.
+   *
+   * Everything else this app fetches goes direct: its own package is excluded from its VPN. For
+   * a host reachable only through the tunnel, the core fetches it over its proxy outbound (see
+   * NexusPlugin.fetchViaTunnel). Resolves for any HTTP answer, error statuses included; rejects
+   * when there was none (not connected, unreachable, timed out). Used for the one-per-launch
+   * subscription retry only.
+   */
+  fetchViaTunnel(options: {
+    url: string;
+    headers?: Record<string, string>;
+  }): Promise<{ status: number; data: string; headers: Record<string, string> }>;
   setClashMode(options: { mode: string }): Promise<void>;
   closeConnections(): Promise<void>;
+
+  /** Read-only facts for the once-per-launch update check. See InstallInfo and update.ts. */
+  getInstallInfo(): Promise<InstallInfo>;
 
   /**
    * Pull the bounded log ring (R3). The core keeps 512 lines; there is no live tail by

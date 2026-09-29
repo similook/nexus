@@ -104,6 +104,38 @@ they can tell whether what arrived is what you built.
 
 ---
 
+## 3a. Sign the update manifest
+
+Installed copies learn about a release from `update-android.json`: a manifest (version,
+versionCode, ABI, minSdk, the APK's name, size and SHA-256) signed with the update key, ECDSA
+P-256. The app checks it once per launch against the public key compiled into it
+(`UPDATE_PUBLIC_KEY` in `clients/web/src/core/update.ts`) and ignores anything that does not
+verify. HTTPS and GitHub are not what users trust here; the key is.
+
+After renaming the APK (§5):
+
+```bash
+cd clients/web
+npx tsx scripts/update-manifest.mts sign \
+  --key "$HOME/.nexus/update-signing/nexus-update-signing-key.pem" \
+  --apk nexus-v1.1.0-arm64.apk --version 1.1.0 --version-code 6 \
+  --out update-android.json
+```
+
+`--version` and `--version-code` must be the APK's own `versionName` and `versionCode` (the aapt
+line in §2). Add `--channels github,play` only once that versionCode is live on Play: a Play
+install is sent to Play, and would otherwise be told about an update Play does not have yet.
+
+The tool refuses any key other than the compiled-in one, and opens the result with the app's
+own verifier before writing it.
+
+**The private key never enters this repository**, is never printed, and cannot be recovered.
+Back it up offline with the keystore. Replacing it strands every installed copy: they reject
+anything signed with a new key until the user installs, by hand, a release carrying the new
+public key.
+
+---
+
 ## 4. Tag
 
 Tag the commit you actually built from, not whatever is on `main` afterwards.
@@ -127,6 +159,9 @@ GitHub → **Releases** → **Draft a new release**.
 - **Attach:** `app-release.apk` — rename it to `nexus-v1.0.0-arm64.apk` first. A file called
   `app-release.apk` in someone's Downloads folder six months from now is unidentifiable, and the
   ABI in the name saves a support round-trip.
+- **Attach:** `update-android.json` (§3a), and keep one on **every** release marked latest,
+  desktop-only ones included. The app reads `releases/latest/download/update-android.json`; a
+  latest release without it means no installed copy hears about any update.
 - **Set as the latest release:** yes. The README links `../../releases/latest`.
 - **Pre-release:** no, unless you want it hidden from that link.
 
@@ -190,6 +225,9 @@ Verify before installing:
 
 - [ ] Download the asset from the release page and check the SHA-256 matches. This catches an
       upload that silently truncated.
+- [ ] Check it against the signed manifest too, from `clients/web`:
+      `npx tsx scripts/update-manifest.mts verify update-android.json --apk <downloaded apk>`.
+      It must say the signature is OK and the APK matches the signed size and SHA-256.
 - [ ] Install that downloaded file on a clean device and connect once.
 - [ ] Open the two links in `.github/ISSUE_TEMPLATE/config.yml` and confirm they resolve.
 - [ ] Enable **Discussions** if you referenced it there.

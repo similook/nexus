@@ -85,6 +85,16 @@ function save(records: SubscriptionRecord[]): void {
   }
 }
 
+export interface RefreshOptions {
+  /** Fetch through the running tunnel instead of directly. See fetchSubscription. */
+  viaTunnel?: boolean;
+  /**
+   * Not asked for by the user (useAutoRefresh.ts). Leaves `busy` alone, so a manual Update or
+   * Add is never disabled by a background fetch that may take its full timeout to fail.
+   */
+  automatic?: boolean;
+}
+
 export interface UseSubscriptions {
   /**
    * False until the stored lists have been read.
@@ -114,7 +124,7 @@ export interface UseSubscriptions {
     failed: number;
     failures: Array<{ uri: string; reason: string }>;
   };
-  refresh: (id: string) => Promise<{ imported: number; failed: number }>;
+  refresh: (id: string, options?: RefreshOptions) => Promise<{ imported: number; failed: number }>;
   remove: (id: string) => void;
   removeManual: (id: string) => void;
   /**
@@ -165,10 +175,10 @@ export function useSubscriptions(): UseSubscriptions {
   }, []);
 
   const importInto = useCallback(
-    async (url: string, existingId?: string) => {
-      setBusy(true);
+    async (url: string, existingId?: string, options: RefreshOptions = {}) => {
+      if (!options.automatic) setBusy(true);
       try {
-        const result = await importSubscription({ url });
+        const result = await importSubscription({ url, viaTunnel: options.viaTunnel });
         const record: SubscriptionRecord = {
           id: existingId ?? `sub-${Date.now().toString(36)}`,
           url,
@@ -191,7 +201,7 @@ export function useSubscriptions(): UseSubscriptions {
 
         return { imported: result.nodes.length, failed: result.failures.length };
       } finally {
-        setBusy(false);
+        if (!options.automatic) setBusy(false);
       }
     },
     [],
@@ -207,10 +217,10 @@ export function useSubscriptions(): UseSubscriptions {
   );
 
   const refresh = useCallback(
-    (id: string) => {
+    (id: string, options?: RefreshOptions) => {
       const record = subscriptions.find((r) => r.id === id);
       if (!record) throw new SubscriptionError('Subscription not found');
-      return importInto(record.url, id);
+      return importInto(record.url, id, options);
     },
     [subscriptions, importInto],
   );

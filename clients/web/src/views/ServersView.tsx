@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { AddSubscriptionDialog } from '../components/AddSubscriptionDialog';
 import { NodeSheet, type NodeSheetTab } from '../components/NodeSheet';
+import { SubscriptionShareSheet } from '../components/SubscriptionShareSheet';
 import { QrScanner } from '../components/QrScanner';
 import { useToast } from '../components/Toast';
 import { useNexus } from '../core/NexusProvider';
-import type { UseSubscriptions } from '../core/useSubscriptions';
+import type { SubscriptionRecord, UseSubscriptions } from '../core/useSubscriptions';
 import { extractConfigUris, type SubscriptionUserinfo } from '../core/subscription';
 import { endpointOf, isQuicProtocol, pingTone, type ServerNode } from '../data/servers';
 import { formatTotal } from '../core/format';
@@ -21,7 +22,7 @@ export function ServersView({
   subs: UseSubscriptions;
 }) {
   const toast = useToast();
-  const { connection } = useNexus();
+  const { connection, activeConfig } = useNexus();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -36,6 +37,8 @@ export function ServersView({
 
   /** Which node the details/edit/share sheet is showing, and on which tab. */
   const [sheet, setSheet] = useState<{ node: ServerNode; tab: NodeSheetTab } | null>(null);
+  /** Which subscription's share sheet is open. */
+  const [sharing, setSharing] = useState<SubscriptionRecord | null>(null);
   const [scanning, setScanning] = useState(false);
   const totalNodes = subs.nodes.length;
   const [testing, setTesting] = useState(false);
@@ -43,16 +46,25 @@ export function ServersView({
   /**
    * The live tunnel's own url-test result, which is a different measurement from the TCP
    * probe: it goes through the running proxy, so it proves the credentials work, not just that
-   * the host answers. Only available for the connected node.
+   * the host answers.
+   *
+   * It describes the tunnel that is RUNNING, so it is written only to that node's row - never
+   * to the selection. The two diverge: the Quick Settings tile starts the last connected config,
+   * and the selection can move without the tunnel following. When the app cannot say which
+   * node is running (NexusApi.activeConfig is null), the number is shown and credited to none.
    */
   useEffect(
     () =>
       coreEvents.subscribe('proxyDelay', ({ delayMs, ok }) => {
-        if (!selectedId) return;
-        setLatency((prev) => ({ ...prev, [selectedId]: ok ? delayMs : -1 }));
+        const running = activeConfig === null
+          ? undefined
+          : subs.nodes.find((n) => n.config === activeConfig);
+        if (running) {
+          setLatency((prev) => ({ ...prev, [running.id]: ok ? delayMs : -1 }));
+        }
         toast(ok ? `${delayMs} ms through the tunnel` : 'No response through the tunnel', ok ? undefined : '⚠');
       }),
-    [selectedId, toast],
+    [activeConfig, subs.nodes, toast],
   );
 
   /**
@@ -327,6 +339,11 @@ export function ServersView({
                       path="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
                     />
                     <IconBtn
+                      label="Share"
+                      onClick={() => setSharing(record)}
+                      path="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z"
+                    />
+                    <IconBtn
                       label="Delete"
                       danger
                       onClick={() => {
@@ -407,6 +424,8 @@ export function ServersView({
         onClose={() => setSheet(null)}
         onToast={toast}
       />
+
+      <SubscriptionShareSheet record={sharing} onClose={() => setSharing(null)} onToast={toast} />
 
       {/*
         These handlers are inline and get a new identity on every render of this component -
