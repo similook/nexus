@@ -73,6 +73,17 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
     @Volatile
     private var announcedRunning: Boolean? = null
 
+    /**
+     * The config and display name the core is ACTUALLY running - set where a core is published,
+     * cleared by [announce] on every stop. This, not the UI's selection, is what the app shows as
+     * the active server: a tunnel the tile or boot started runs whatever was last remembered,
+     * which need not be the node the user has selected. See [putRunningServer].
+     */
+    @Volatile
+    private var runningConfig: String? = null
+    @Volatile
+    private var runningName: String? = null
+
     private val powerReceiver = PowerReceiver(
         onScreenOn = { on -> service.get()?.setScreenOn(on) },
         onDeviceIdle = { idle -> service.get()?.setDeviceIdle(idle) },
@@ -173,6 +184,10 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                         // Switching node while connected has to move the notification with
                         // it, or the shade keeps naming the server the user just left.
                         notification.showConnected(serverLabel(nodeName, guarded))
+                        // ...and the app's idea of which server is running, likewise.
+                        runningConfig = guarded
+                        runningName = nodeName
+                        announceRunningServer()
                     } catch (e: Exception) {
                         NexusLog.e(TAG, "reload failed", e)
                         notification.showError(e.message ?: "reload failed")
@@ -186,7 +201,12 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
             // session, so a startService intent is cheap enough and avoids keeping a binding
             // alive purely to carry it.
             ACTION_UI_FOREGROUND -> {
-                service.get()?.setUIForeground(intent.getBooleanExtra(EXTRA_FOREGROUND, false))
+                val foreground = intent.getBooleanExtra(EXTRA_FOREGROUND, false)
+                service.get()?.setUIForeground(foreground)
+                // The app may have been started long after this tunnel (by the tile, or at boot)
+                // and has never heard which server it runs. Coming to the foreground is when it
+                // needs to know, so say it now. Identity only - not a start/stop event.
+                if (foreground) announceRunningServer()
                 return START_STICKY
             }
 
@@ -358,6 +378,8 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
                 notification.showConnected(serverLabel(nodeName, guardedForReload))
                 rememberForRelaunch(guardedForReload, nodeName)
                 NexusLog.i(TAG, "swapped config via reload")
+                runningConfig = guardedForReload
+                runningName = nodeName
                 announce(true, null)
                 return
             } catch (e: Exception) {
@@ -435,6 +457,8 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         isRunning = true
         rememberForRelaunch(guarded, nodeName)
         notifyTileStateChanged()
+        runningConfig = guarded
+        runningName = nodeName
         announce(true, null)
 
         // Register AFTER the core exists — PowerReceiver.register() seeds the initial screen
@@ -523,16 +547,67 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
      * follows failStart does not send a second one that would clear the error on screen.
      */
     private fun announce(running: Boolean, reason: String?) {
+        // Nothing is running after any stop, announced or suppressed: forget the identity first.
+        if (!running) {
+            runningConfig = null
+            runningName = null
+        }
         if (!running && announcedRunning == false) return
         announcedRunning = running
         runCatching {
             sendBroadcast(
-                Intent(ACTION_TUNNEL_STATE)
-                    .setPackage(packageName)
-                    .putExtra(EXTRA_RUNNING, running)
-                    .apply { if (!reason.isNullOrEmpty()) putExtra(EXTRA_REASON, reason) },
+                putRunningServer(
+                    Intent(ACTION_TUNNEL_STATE)
+                        .setPackage(packageName)
+                        .putExtra(EXTRA_RUNNING, running)
+                        .apply { if (!reason.isNullOrEmpty()) putExtra(EXTRA_REASON, reason) },
+                ),
             )
         }.onFailure { NexusLog.w(TAG, "could not announce tunnel state: ${it.message}") }
+    }
+
+    /**
+     * Tell the app which server is running - or that none is - without a start/stop event.
+     *
+     * Sent when the app comes to the foreground and after an in-place reload, the two moments
+     * the app can be holding a stale or missing identity. Package-scoped like [announce].
+     */
+    private fun announceRunningServer() {
+        runCatching {
+            sendBroadcast(
+                putRunningServer(
+                    Intent(ACTION_RUNNING_SERVER)
+                        .setPackage(packageName)
+                        .putExtra(EXTRA_RUNNING, isRunning && runningConfig != null),
+                ),
+            )
+        }.onFailure { NexusLog.w(TAG, "could not announce the running server: ${it.message}") }
+    }
+
+    /**
+     * Add the running server's identity - read from the config the core is running, never
+     * from the UI - when there is one: the proxy outbound's server, port and type, and the
+     * node's display name if the start carried one (boot starts do not).
+     */
+    private fun putRunningServer(intent: Intent): Intent {
+        val config = runningConfig ?: return intent
+        if (!intent.getBooleanExtra(EXTRA_RUNNING, false)) return intent
+        runCatching {
+            val outbounds = org.json.JSONObject(config).optJSONArray("outbounds") ?: return@runCatching
+            for (i in 0 until outbounds.length()) {
+                val outbound = outbounds.optJSONObject(i) ?: continue
+                if (outbound.optString("tag") != "proxy") continue
+                val server = outbound.optString("server", "")
+                val port = outbound.optInt("server_port", 0)
+                if (server.isEmpty() || port !in 1..65535) return@runCatching
+                intent.putExtra(EXTRA_SERVER, server)
+                    .putExtra(EXTRA_PORT, port)
+                    .putExtra(EXTRA_PROTOCOL, outbound.optString("type", ""))
+                runningName?.trim()?.takeIf { it.isNotEmpty() }?.let { intent.putExtra(EXTRA_NODE_NAME, it) }
+                return@runCatching
+            }
+        }
+        return intent
     }
 
     /**
@@ -995,6 +1070,16 @@ class NexusVpnService : VpnService(), PlatformInterfaceWrapper {
         const val EXTRA_RUNNING = "running"
         /** Present only when a start failed; a clean stop carries none. */
         const val EXTRA_REASON = "reason"
+
+        /**
+         * Which server the core is running, without a start/stop: EXTRA_RUNNING plus, when known,
+         * EXTRA_SERVER / EXTRA_PORT / EXTRA_PROTOCOL / EXTRA_NODE_NAME. The same identity extras
+         * ride on ACTION_TUNNEL_STATE when it reports a start. See [putRunningServer].
+         */
+        const val ACTION_RUNNING_SERVER = "io.nexus.plugin.RUNNING_SERVER"
+        const val EXTRA_SERVER = "server"
+        const val EXTRA_PORT = "port"
+        const val EXTRA_PROTOCOL = "protocol"
 
         /** A GET through the tunnel, for the app process. See [fetchViaTunnel]. */
         const val ACTION_FETCH_VIA_TUNNEL = "io.nexus.plugin.FETCH_VIA_TUNNEL"

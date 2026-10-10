@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { extractConfigUris } from '../core/subscription';
+import { classifyImport } from '../core/subscription';
 
 /**
  * One field for everything the user can paste.
@@ -16,33 +16,11 @@ import { extractConfigUris } from '../core/subscription';
  * and rewrite it. Telling them is the honest middle ground.
  */
 
-type Detected =
-  | { kind: 'empty' }
-  | { kind: 'subscription'; url: string; insecure: boolean }
-  | { kind: 'configs'; uris: string[] }
-  | { kind: 'unknown' };
-
 /**
- * Decide what the pasted text is.
- *
- * Order matters. A subscription URL is checked FIRST and against the whole trimmed input,
- * because some panels hand out links with a proxy scheme inside the query string — scanning
- * for URIs first would pull that fragment out and import a broken node instead of fetching
- * the list.
+ * Decide what the pasted text is - the same classification the QR scanner uses, so a link that
+ * imports from one imports from the other. See classifyImport for the order and why it matters.
  */
-function detect(raw: string): Detected {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return { kind: 'empty' };
-
-  if (/^https?:\/\/\S+$/i.test(trimmed)) {
-    return { kind: 'subscription', url: trimmed, insecure: /^http:\/\//i.test(trimmed) };
-  }
-
-  const uris = extractConfigUris(trimmed);
-  if (uris.length > 0) return { kind: 'configs', uris };
-
-  return { kind: 'unknown' };
-}
+const detect = classifyImport;
 
 export function AddSubscriptionDialog({
   open,

@@ -24,15 +24,26 @@ import { endpointOf, type ServerNode } from '../data/servers';
  *     app being backgrounded (split screen, a system dialog over the top).
  * ─────────────────────────────────────────────────────────────────────────────────────
  *
- * The probe is the native TCP handshake, so it does not disturb the tunnel and works whether
- * or not one is up. See NexusCorePlugin.tcpPing.
+ * TWO MEASUREMENTS, ONE TIMER:
+ *   - 'server' (disconnected): the native TCP handshake to the node's own endpoint, outside the
+ *     tunnel. "Server latency": reachability of the server, not the latency of a VPN path.
+ *     See NexusCorePlugin.tcpPing.
+ *   - 'vpn' (connected): sing-box's URL test, run by the core THROUGH the running proxy
+ *     outbound - the path user traffic takes. Never the direct handshake: that measures only
+ *     the first hop. See NexusCorePlugin.pingProxy.
  */
 
 /** Generous on purpose. Latency to a proxy does not meaningfully change every second. */
 const POLL_INTERVAL_MS = 15_000;
 
-export function useLivePing(node: ServerNode | null): number | null {
-  const [ping, setPing] = useState<number | null>(null);
+/**
+ * Milliseconds; 'pending' while a VPN test runs; 'failed' when a VPN test got no answer; null
+ * when there is nothing to show (no target, or the server did not answer the handshake).
+ */
+export type LivePing = number | 'pending' | 'failed' | null;
+
+export function useLivePing(node: ServerNode | null, via: 'server' | 'vpn' = 'server'): LivePing {
+  const [ping, setPing] = useState<LivePing>(null);
 
   useEffect(() => {
     // A measurement belongs to the node it was taken for. Clearing on change stops the
@@ -44,8 +55,10 @@ export function useLivePing(node: ServerNode | null): number | null {
 
     let stopped = false;
     let timer: ReturnType<typeof setInterval> | null = null;
+    // At most one VPN test at a time: a tick that finds one still running is skipped.
+    let inFlight = false;
 
-    const probe = async () => {
+    const probeServer = async () => {
       try {
         const { results } = await NexusCore.tcpPing({
           targets: [{ id: node.id, server: endpoint.server, port: endpoint.port }],
@@ -58,6 +71,29 @@ export function useLivePing(node: ServerNode | null): number | null {
         if (!stopped) setPing(null);
       }
     };
+
+    const probeVpn = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      // A new measurement is running: say so rather than keep showing the previous one.
+      setPing('pending');
+      try {
+        const result = await NexusCore.pingProxy({ silent: true });
+        // Discarded: the tunnel stopped, the app left the foreground or the running server
+        // changed. It belongs to nothing on screen; the next probe measures again.
+        if (stopped || result.discarded) return;
+        setPing(result.ok ? result.delayMs : 'failed');
+      } catch (e) {
+        // PING_BUSY: a test the core may still be finishing. Not a failure - stay pending and
+        // try again on the next tick.
+        if (stopped || (e as { code?: string }).code === 'PING_BUSY') return;
+        setPing('failed');
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const probe = via === 'vpn' ? probeVpn : probeServer;
 
     const start = () => {
       if (timer !== null || stopped) return;
@@ -91,7 +127,7 @@ export function useLivePing(node: ServerNode | null): number | null {
       // gone, so failures are swallowed rather than surfaced.
       void appListener.then((handle) => handle.remove()).catch(() => {});
     };
-  }, [node]);
+  }, [node, via]);
 
   return ping;
 }

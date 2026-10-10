@@ -10,7 +10,8 @@
  *
  *   npx tsx scripts/check-parsers.mts
  */
-import { extractConfigUris } from '../src/core/subscription';
+import { classifyImport, extractConfigUris, parseSubscription, type ImportKind } from '../src/core/subscription';
+import { endpointOf } from '../src/data/servers';
 
 const U = '11111111-2222-3333-4444-555555555555';
 const VMESS_B64 = Buffer.from(
@@ -62,8 +63,84 @@ for (const [name, input, expected] of CASES) {
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// classifyImport: what the Add box and the QR scanner do with a paste / scanned text.
+// ---------------------------------------------------------------------------------------
+const SUB = 'https://panel.example.com/sub/abcDEF123?token=xyz';
+const enc = encodeURIComponent;
+const b64 = (s: string) => Buffer.from(s).toString('base64');
+const b64url = (s: string) => b64(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const sub = (url: string, insecure = false): ImportKind => ({ kind: 'subscription', url, insecure });
+
+const IMPORT_CASES: Array<[name: string, input: string, expected: ImportKind]> = [
+  // Unchanged behaviour.
+  ['bare https subscription', SUB, sub(SUB)],
+  ['bare http subscription is flagged insecure', 'http://panel.example.com/sub', sub('http://panel.example.com/sub', true)],
+  ['whitespace around a bare url', `\n  ${SUB}  \n`, sub(SUB)],
+  ['proxy scheme inside the query stays a subscription', 'https://p.example.com/s?x=vless://foo', sub('https://p.example.com/s?x=vless://foo')],
+  ['single config', A, { kind: 'configs', uris: [A] }],
+  ['configs next to a t.me link stay configs', `سرورها:\n${A}\nعضو شوید: https://t.me/x`, { kind: 'configs', uris: [A] }],
+  ['base64 body stays configs', b64(`${A}\n${C}`), { kind: 'configs', uris: [A, C] }],
+  ['empty', '   ', { kind: 'empty' }],
+  ['prose only', 'hello world', { kind: 'unknown' }],
+  // New: a subscription URL inside other text.
+  ['url inside prose', `Your subscription:\n${SUB}\nThanks`, sub(SUB)],
+  ['url inside persian prose', `لینک اشتراک شما: ${SUB}`, sub(SUB)],
+  ['trailing prose punctuation', `link: ${SUB}.`, sub(SUB)],
+  ['fragment with a space is cut at the space', 'https://panel.example.com/sub/abc#My Sub', sub('https://panel.example.com/sub/abc#My')],
+  ['two urls are ambiguous', `${SUB} and https://other.example.com/sub`, { kind: 'unknown' }],
+  // New: subscription links wrapped in other clients' import schemes.
+  ['sub:// base64', `sub://${b64(SUB)}#Remark`, sub(SUB)],
+  ['sub:// base64url without padding', `sub://${b64url(SUB)}`, sub(SUB)],
+  ['sing-box import-remote-profile', `sing-box://import-remote-profile?url=${enc(SUB)}#My%20Sub`, sub(SUB)],
+  ['clash install-config', `clash://install-config?url=${enc(SUB)}`, sub(SUB)],
+  ['clashmeta install-config with name', `clashmeta://install-config?url=${enc(SUB)}&name=x`, sub(SUB)],
+  ['v2rayng install-sub', `v2rayng://install-sub?url=${enc(SUB)}`, sub(SUB)],
+  ['hiddify import raw url', `hiddify://import/${SUB}#Name`, sub(SUB)],
+  ['hiddify import encoded url', `hiddify://import/${enc(SUB)}`, sub(SUB)],
+  // Security: a wrapper may only ever yield http(s).
+  ['sub:// carrying file: is rejected', `sub://${b64('file:///etc/hosts')}`, { kind: 'unknown' }],
+  ['sing-box carrying file: is rejected', `sing-box://import-remote-profile?url=${enc('file:///x')}`, { kind: 'unknown' }],
+  ['sing-box carrying javascript: is rejected', `sing-box://import-remote-profile?url=${enc('javascript:alert(1)')}`, { kind: 'unknown' }],
+  ['unknown wrapper is not unwrapped', `foo://install-config?url=${enc(SUB)}`, { kind: 'unknown' }],
+  ['ftp is not a subscription', 'ftp://panel.example.com/sub', { kind: 'unknown' }],
+];
+
+for (const [name, input, expected] of IMPORT_CASES) {
+  const actual = classifyImport(input);
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  if (ok) {
+    console.log(`  ok   import: ${name}`);
+  } else {
+    failed++;
+    console.error(`  FAIL import: ${name}`);
+    console.error(`         expected ${JSON.stringify(expected)}`);
+    console.error(`         actual   ${JSON.stringify(actual)}`);
+  }
+}
+
+// A subscription body with several configs imports every one, each against its own endpoint.
+{
+  const { nodes, failures } = parseSubscription(b64(`${A}\n${C}\n${H2}`), 'sub-test');
+  const got = nodes.map((n) => [n.id, endpointOf(n)?.server, endpointOf(n)?.port]);
+  const want = [
+    ['sub-test-0', 'a.example.com', 443],
+    ['sub-test-1', 'c.example.com', 443],
+    ['sub-test-2', 'h.example.com', 443],
+  ];
+  if (failures.length === 0 && JSON.stringify(got) === JSON.stringify(want)) {
+    console.log('  ok   import: multi-config subscription body -> 3 nodes, own endpoints');
+  } else {
+    failed++;
+    console.error('  FAIL import: multi-config subscription body');
+    console.error(`         expected ${JSON.stringify(want)}`);
+    console.error(`         actual   ${JSON.stringify(got)} failures=${failures.length}`);
+  }
+}
+
+const total = CASES.length + IMPORT_CASES.length + 1;
 if (failed > 0) {
-  console.error(`\n${failed} of ${CASES.length} parser checks failed.`);
+  console.error(`\n${failed} of ${total} parser checks failed.`);
   process.exit(1);
 }
-console.log(`\nall ${CASES.length} parser checks passed`);
+console.log(`\nall ${total} parser checks passed`);

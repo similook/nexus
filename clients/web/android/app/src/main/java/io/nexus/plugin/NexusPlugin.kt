@@ -14,6 +14,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.VpnService
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
@@ -36,7 +37,9 @@ import io.nexus.libbox.OutboundGroupIterator
 import io.nexus.libbox.OutboundGroupItemIterator
 import io.nexus.libbox.StatusMessage
 import io.nexus.libbox.StringIterator
+import io.nexus.nexuscore.HostResolver
 import io.nexus.nexuscore.Nexuscore
+import io.nexus.nexuscore.ProbeHandler
 
 /**
  * The Capacitor plugin. Runs in the APP process — the core is in :core.
@@ -87,6 +90,41 @@ class NexusPlugin : Plugin() {
 
     @Volatile
     private var pingTimeout: ScheduledFuture<*>? = null
+
+    /**
+     * The one URL test in flight, or null. Confined to [io].
+     *
+     * The Outbounds stream answers a subscription with the HISTORY the core already holds, so
+     * the first proxy delay it reports is usually the previous test's. A result is accepted only
+     * from this request's own stream, stamped no earlier than the request and later than the
+     * history that existed when the stream opened, for the server that was running when it was
+     * asked - see onPingSnapshot.
+     */
+    private class PingRequest(
+        val id: Long,
+        val call: PluginCall,
+        /** No "proxyDelay" event: the caller reads the result from the call (Home). */
+        val silent: Boolean,
+        /** Wall-clock second of the request. History from before it is not this test. */
+        val requestedAtSec: Long,
+        /** runningServer when asked. A result for any other server is discarded. */
+        val identity: String?,
+    ) {
+        /** urlTestTime in the stream's first snapshot: what the core held before we asked. */
+        var baselineSec = 0L
+        var dispatched = false
+    }
+
+    private var pingRequest: PingRequest? = null
+    private var pingSeq = 0L
+
+    /**
+     * elapsedRealtime until which a dispatched test may still finish inside the core. The core
+     * keeps running a test whose result we stopped waiting for, and its late result would carry
+     * a fresh timestamp - so no new test starts until it can no longer land. Cleared when a
+     * result arrives, and when the tunnel stops (the next core starts with an empty history).
+     */
+    private var pingBusyUntil = 0L
 
     /**
      * Status ticks seen, for bounded diagnostic logging.
@@ -149,13 +187,49 @@ class NexusPlugin : Plugin() {
     @Volatile
     private var uiVisible: Boolean = false
 
+    /**
+     * The server the CORE says it is running - `{server, port, name, protocol}` - or null when
+     * nothing runs or the core has not said. Never derived from the UI's selection: the tile and
+     * boot start whatever the core last ran. Rides on every status tick and on getStatus, the
+     * same way coreStartedAt does.
+     */
+    @Volatile
+    private var runningServer: JSObject? = null
+
+    private fun updateRunningServer(intent: Intent) {
+        val server = intent.getStringExtra(NexusVpnService.EXTRA_SERVER)
+        val port = intent.getIntExtra(NexusVpnService.EXTRA_PORT, 0)
+        val next = if (intent.getBooleanExtra(NexusVpnService.EXTRA_RUNNING, false) &&
+            !server.isNullOrEmpty() && port in 1..65535
+        ) {
+            JSObject()
+                .put("server", server)
+                .put("port", port)
+                .put("name", intent.getStringExtra(NexusVpnService.EXTRA_NODE_NAME) ?: org.json.JSONObject.NULL)
+                .put("protocol", intent.getStringExtra(NexusVpnService.EXTRA_PROTOCOL)?.takeIf { it.isNotEmpty() } ?: org.json.JSONObject.NULL)
+        } else {
+            null
+        }
+        if (next?.toString() != runningServer?.toString()) {
+            runningServer = next
+            // The identity is not part of the tick dedupe signature: without this, an idle
+            // tunnel's next tick would be dropped and the new identity would never reach the UI.
+            lastStatusSignature = null
+        }
+    }
+
     private val tunnelStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                NexusVpnService.ACTION_TUNNEL_STATE -> onTunnelState(
-                    intent.getBooleanExtra(NexusVpnService.EXTRA_RUNNING, false),
-                    intent.getStringExtra(NexusVpnService.EXTRA_REASON),
-                )
+                NexusVpnService.ACTION_TUNNEL_STATE -> {
+                    // Identity first, so the "started" event below already carries it.
+                    updateRunningServer(intent)
+                    onTunnelState(
+                        intent.getBooleanExtra(NexusVpnService.EXTRA_RUNNING, false),
+                        intent.getStringExtra(NexusVpnService.EXTRA_REASON),
+                    )
+                }
+                NexusVpnService.ACTION_RUNNING_SERVER -> updateRunningServer(intent)
                 NexusVpnService.ACTION_FETCH_RESULT -> {
                     val id = intent.getStringExtra(NexusVpnService.EXTRA_REQUEST_ID) ?: return
                     val result = intent.getStringExtra(NexusVpnService.EXTRA_RESULT)
@@ -259,6 +333,7 @@ class NexusPlugin : Plugin() {
                 tunnelStateReceiver,
                 IntentFilter(NexusVpnService.ACTION_TUNNEL_STATE).apply {
                     addAction(NexusVpnService.ACTION_FETCH_RESULT)
+                    addAction(NexusVpnService.ACTION_RUNNING_SERVER)
                 },
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
@@ -281,7 +356,10 @@ class NexusPlugin : Plugin() {
         if (running) {
             coreRunning = true
             intendedRunning = true
-            notifyListeners("serviceState", JSObject().put("state", "started"))
+            notifyListeners(
+                "serviceState",
+                JSObject().put("state", "started").put("runningServer", runningServer ?: org.json.JSONObject.NULL),
+            )
             if (uiVisible) post { if (!connectStatusClient()) scheduleStatusProbe() }
             return
         }
@@ -289,6 +367,8 @@ class NexusPlugin : Plugin() {
         coreRunning = false
         intendedRunning = false
         disconnectClients()
+        // The next core starts with an empty URL-test history, so nothing of this one can land.
+        post { pingBusyUntil = 0L }
         val event = JSObject().put("state", "stopped")
         if (!reason.isNullOrEmpty()) event.put("reason", reason)
         notifyListeners("serviceState", event)
@@ -445,26 +525,108 @@ class NexusPlugin : Plugin() {
      * `urltest.URLTest(ctx, "", outbound)` and stores the result in urlTestHistoryStorage.
      * That store is what the Outbounds stream reports, which is why this opens one.
      *
-     * The call returns as soon as the test is DISPATCHED. The number arrives later on the
-     * "proxyDelay" event, because the measurement happens on the core's own goroutine.
+     * The call resolves when THIS test has a result: `{ ok, delayMs, testedAt, discarded }`.
+     * Unless `silent`, the result is also sent on the "proxyDelay" event. One test at a time;
+     * a second request while one may still be running is rejected with [PING_BUSY].
      */
     @PluginMethod
     fun pingProxy(call: PluginCall) {
-        val client = statusClient
-        if (client == null) {
-            call.reject("core is not running")
-            return
-        }
+        val silent = call.getBoolean("silent", false) == true
+        val identity = runningServer?.toString()
+        // Checked on [io], not here: on resume the status client is attached by a task already
+        // queued there, so asking from here would fail a request that is about to be valid.
         post {
+            if (statusClient == null) {
+                call.reject("core is not running")
+                return@post
+            }
+            if (pingRequest != null || android.os.SystemClock.elapsedRealtime() < pingBusyUntil) {
+                call.reject("a latency test is already running", PING_BUSY)
+                return@post
+            }
+            val request = PingRequest(++pingSeq, call, silent, System.currentTimeMillis() / 1000L, identity)
+            pingRequest = request
             try {
-                connectPingClient()
-                client.urlTest(PROXY_TAG)
-                NexusLog.d(TAG) { "url test dispatched for outbound \"$PROXY_TAG\"" }
-                call.resolve()
+                // The test itself is dispatched by onPingSnapshot, once the stream has delivered
+                // the history it opens with.
+                connectPingClient(request.id)
             } catch (e: Exception) {
+                pingRequest = null
                 disconnectPingClient()
                 call.reject(e.message ?: "url test failed")
             }
+        }
+    }
+
+    /**
+     * One snapshot from request [requestId]'s Outbounds stream. MUST run on [io].
+     *
+     * The FIRST snapshot is sent the moment the stream subscribes, so it is history: it becomes
+     * the baseline and only then is the test dispatched. After that, a proxy entry is this
+     * test's result only if it is newer than both the request and the baseline. Anything else
+     * - an older result, another request's stream, a different running server - is not.
+     */
+    private fun onPingSnapshot(requestId: Long, testedAtSec: Long, delayMs: Int) {
+        val request = pingRequest?.takeIf { it.id == requestId } ?: return
+        if (!request.dispatched) {
+            request.baselineSec = testedAtSec
+            request.dispatched = true
+            val client = statusClient
+            if (client == null) {
+                finishPing(requestId, ok = false, discarded = true)
+                return
+            }
+            pingBusyUntil = android.os.SystemClock.elapsedRealtime() + PING_CORE_MAX_MS
+            try {
+                client.urlTest(PROXY_TAG)
+                NexusLog.d(TAG) { "url test #$requestId dispatched for outbound \"$PROXY_TAG\"" }
+            } catch (e: Exception) {
+                NexusLog.w(TAG, "url test #$requestId could not be dispatched: ${e.message}")
+                finishPing(requestId, ok = false)
+            }
+            return
+        }
+        // 0 means "no history entry", which is what a FAILED test leaves behind - urltest
+        // deletes the entry rather than storing a zero. The timeout reports the failure.
+        if (delayMs <= 0) return
+        if (testedAtSec < request.requestedAtSec || testedAtSec <= request.baselineSec) return
+        if (runningServer?.toString() != request.identity) {
+            finishPing(requestId, ok = false, discarded = true)
+            return
+        }
+        finishPing(requestId, ok = true, delayMs = delayMs, testedAtSec = testedAtSec)
+    }
+
+    /** Settle request [requestId] exactly once and close its stream. MUST run on [io]. */
+    private fun finishPing(
+        requestId: Long,
+        ok: Boolean,
+        delayMs: Int = 0,
+        testedAtSec: Long = 0L,
+        discarded: Boolean = false,
+    ) {
+        val request = pingRequest?.takeIf { it.id == requestId } ?: return
+        pingRequest = null
+        // The core's test is over only when its result arrived; otherwise it may still land.
+        if (ok) pingBusyUntil = 0L
+        disconnectPingClient()
+        NexusLog.i(
+            TAG,
+            "url test #$requestId " + when {
+                ok -> "result ${delayMs}ms"
+                discarded -> "discarded"
+                else -> "failed"
+            },
+        )
+        request.call.resolve(
+            JSObject()
+                .put("ok", ok)
+                .put("delayMs", if (ok) delayMs else 0)
+                .put("testedAt", testedAtSec * 1000L)
+                .put("discarded", discarded),
+        )
+        if (!request.silent && !discarded) {
+            notifyListeners("proxyDelay", JSObject().put("delayMs", if (ok) delayMs else 0).put("ok", ok))
         }
     }
 
@@ -543,6 +705,104 @@ class NexusPlugin : Plugin() {
             }
             call.resolve(JSObject().put("results", results))
         }
+    }
+
+    /**
+     * Delay for EVERY server, each through its own config - without touching the tunnel.
+     *
+     * `{ runId, targets: [{ id, fingerprint, config }] }`. Resolves at once with `{ runId }`;
+     * results stream as `serverProbe` events `{ runId, serverId, fingerprint, status, delayMs }`
+     * and the run ends with exactly one `serverProbeDone` `{ runId, cancelled }`.
+     *
+     * The work is nexuscore.ProbeServers: a short-lived sing-box instance in THIS (app) process,
+     * with no inbound, no TUN and no listener, that builds each server's own outbound, runs the
+     * same URL test Live uses through it, and closes it again. The :core process, its box, the
+     * active server and the tunnel are never involved. This process is on the VPN's deny list
+     * (openTun), so probe traffic leaves over the underlying network, like [tcpPing].
+     *
+     * Only status categories come back (ok, timeout, refused, unreachable, dns_failed,
+     * handshake_failed, rejected, config_invalid, cancelled, failed): raw errors name hosts and
+     * addresses, and they stay in Go. Nothing here logs a host, an address or a config.
+     *
+     * BATTERY: user-initiated only (Test All). Bounded in Go (6 workers, 6 s per server), one
+     * run at a time, and cancelled when the UI leaves the foreground or the plugin dies.
+     */
+    @PluginMethod
+    fun probeServers(call: PluginCall) {
+        val runId = call.getLong("runId")
+        val targets = call.getArray("targets")
+        if (runId == null || runId <= 0L || targets == null) {
+            call.reject("runId and targets are required")
+            return
+        }
+        val payload = org.json.JSONArray()
+        for (i in 0 until targets.length()) {
+            val item = runCatching { targets.getJSONObject(i) }.getOrNull() ?: continue
+            val id = item.optString("id", "")
+            val config = item.optString("config", "")
+            if (id.isEmpty() || config.isEmpty()) continue
+            payload.put(
+                org.json.JSONObject()
+                    .put("id", id)
+                    .put("fingerprint", item.optString("fingerprint", ""))
+                    .put("config", config)
+            )
+        }
+        if (payload.length() == 0) {
+            call.reject("no usable targets")
+            return
+        }
+        // 0, 0: Go's defaults (6 workers, 6 s per server) are the one place those numbers live.
+        if (runCatching { Nexuscore.probeServers(runId, payload.toString(), 0, 0, probeResolver, probeHandler) }.isFailure) {
+            call.reject("probe could not start")
+            return
+        }
+        NexusLog.i(TAG, "probe run $runId: ${payload.length()} servers")
+        call.resolve(JSObject().put("runId", runId))
+    }
+
+    /** Ends run `runId` (or whichever is running, without one). Its `serverProbeDone` follows. */
+    @PluginMethod
+    fun cancelProbe(call: PluginCall) {
+        runCatching { Nexuscore.cancelProbe(call.getLong("runId") ?: 0L) }
+        call.resolve()
+    }
+
+    /**
+     * Called on Go threads, one call at a time. Everything is caught: an exception thrown here
+     * unwinds into native code and takes the process with it (see [post]).
+     */
+    private val probeHandler = object : ProbeHandler {
+        override fun onResult(runId: Long, serverId: String, fingerprint: String, status: String, delayMs: Int) {
+            runCatching {
+                notifyListeners(
+                    "serverProbe",
+                    JSObject()
+                        .put("runId", runId)
+                        .put("serverId", serverId)
+                        .put("fingerprint", fingerprint)
+                        .put("status", status)
+                        .put("delayMs", delayMs),
+                )
+            }
+        }
+
+        override fun onDone(runId: Long, cancelled: Boolean) {
+            runCatching {
+                NexusLog.i(TAG, "probe run $runId ${if (cancelled) "cancelled" else "done"}")
+                notifyListeners("serverProbeDone", JSObject().put("runId", runId).put("cancelled", cancelled))
+            }
+        }
+    }
+
+    /**
+     * The platform resolver - the one ConfigGuard uses for the tunnel's server. Every answer goes
+     * back unfiltered; Go applies ConfigGuard's poisoned/private policy. Must never log.
+     */
+    private val probeResolver = object : HostResolver {
+        override fun resolve(host: String): String = runCatching {
+            InetAddress.getAllByName(host).mapNotNull { it.hostAddress }.joinToString(",")
+        }.getOrDefault("")
     }
 
     /**
@@ -667,18 +927,20 @@ class NexusPlugin : Plugin() {
         }
     }
 
-    /** MUST run on [io] - connect() is a blocking dial. */
-    private fun connectPingClient() {
-        pingTimeout?.cancel(false)
+    /**
+     * Open request [requestId]'s own Outbounds stream. MUST run on [io] - connect() is a
+     * blocking dial. A fresh client per request: its handler carries the request id, so a
+     * snapshot from any other request's stream cannot be mistaken for this one.
+     */
+    private fun connectPingClient(requestId: Long) {
+        disconnectPingClient()
 
-        if (pingClient == null) {
-            val options = CommandClientOptions().apply {
-                addCommand(Libbox.CommandOutbounds)
-            }
-            val client = CommandClient(PingHandler(), options)
-            client.connect()
-            pingClient = client
+        val options = CommandClientOptions().apply {
+            addCommand(Libbox.CommandOutbounds)
         }
+        val client = CommandClient(PingHandler(requestId), options)
+        client.connect()
+        pingClient = client
 
         // Close the stream whether or not an answer arrived. A failed test deletes its history
         // entry rather than writing a zero, so "no event" is the failure signal - and without
@@ -686,10 +948,9 @@ class NexusPlugin : Plugin() {
         pingTimeout = runCatching {
             io.schedule({
                 runCatching {
-                    if (pingClient != null) {
+                    if (pingRequest?.id == requestId) {
                         NexusLog.w(TAG, "url test produced no result within ${PING_TIMEOUT_MS}ms")
-                        notifyListeners("proxyDelay", JSObject().put("delayMs", 0).put("ok", false))
-                        disconnectPingClient()
+                        finishPing(requestId, ok = false)
                     }
                 }
             }, PING_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -762,6 +1023,9 @@ class NexusPlugin : Plugin() {
                 result.put(key, status.get(key))
             }
         }
+        // AFTER the lastStatus merge: that copy is whatever the last tick said, which can be a
+        // tunnel that has since stopped. The core's own current word wins.
+        result.put("runningServer", runningServer ?: org.json.JSONObject.NULL)
         call.resolve(result)
     }
 
@@ -838,6 +1102,9 @@ class NexusPlugin : Plugin() {
     override fun handleOnPause() {
         super.handleOnPause()
         uiVisible = false
+        // A Test All probe is for the screen the user is looking at; it never runs on in the
+        // background. Its done event still reaches the UI, which drops the run.
+        runCatching { Nexuscore.cancelProbe(0L) }
         cancelStatusProbe()
         networkMonitor.stop()
         // Not a throttle, not a filter: we DISCONNECT. A backgrounded WebView that keeps a
@@ -849,6 +1116,7 @@ class NexusPlugin : Plugin() {
 
     override fun handleOnDestroy() {
         runCatching { context.applicationContext.unregisterReceiver(tunnelStateReceiver) }
+        runCatching { Nexuscore.cancelProbe(0L) }
         disconnectClients()
         // shutdown(), not shutdownNow(): disconnectClients just queued the actual closes on
         // [io], and shutdownNow would interrupt them mid-RPC. The executor is daemon-threaded,
@@ -1009,6 +1277,8 @@ class NexusPlugin : Plugin() {
         statusTicks.set(0)
 
         post { doomed.forEach { client -> client?.let { runCatching { it.disconnect() } } } }
+        // Its stream is gone, so a pending URL test can never be accepted: settle it now.
+        post { pingRequest?.let { finishPing(it.id, ok = false, discarded = true) } }
     }
 
     /**
@@ -1088,6 +1358,8 @@ class NexusPlugin : Plugin() {
                 // and skipping the anchor. The uptime clock then restarted from zero on every
                 // return to the app. The stream cannot race itself, so the value rides along.
                 .put("coreStartedAt", coreStartedAt)
+                // Which server is running, as the core reported it (see runningServer).
+                .put("runningServer", runningServer ?: org.json.JSONObject.NULL)
 
             val tick = statusTicks.incrementAndGet()
             if (tick <= 3 || tick % 30 == 0) {
@@ -1222,29 +1494,25 @@ class NexusPlugin : Plugin() {
      * CommandOutbounds only, and emitting serviceState from a second client would make the UI
      * flap between two sources of truth.
      */
-    private inner class PingHandler : CommandClientHandler {
+    private inner class PingHandler(private val requestId: Long) : CommandClientHandler {
 
         override fun writeOutbounds(outbounds: io.nexus.libbox.OutboundGroupItemIterator?) {
             outbounds ?: return
+            var testedAtSec = 0L
+            var delay = 0
             while (outbounds.hasNext()) {
                 val item = outbounds.next() ?: continue
                 if (item.tag != PROXY_TAG) continue
-
-                // 0 means "no history entry", which is what a FAILED test leaves behind -
-                // urltest deletes the entry rather than storing a zero. Ignore it and let the
-                // timeout report the failure, otherwise the first tick after dispatch (before
-                // the measurement finishes) would be reported as a failure every time.
-                val delay = item.urlTestDelay
-                NexusLog.d(TAG) { "outbounds tick: tag=${item.tag} type=${item.type} delay=$delay" }
-                if (delay <= 0) continue
-
-                notifyListeners("proxyDelay", JSObject().put("delayMs", delay).put("ok", true))
-                // Hop to [io] rather than closing from this callback: disconnect() is a
-                // blocking RPC, and tearing a client down from inside its own callback is a
-                // reentrancy hazard on the gomobile side.
-                post { disconnectPingClient() }
-                return
+                testedAtSec = item.urlTestTime
+                delay = item.urlTestDelay
+                break
             }
+            NexusLog.d(TAG) { "outbounds tick #$requestId: delay=$delay at=$testedAtSec" }
+            // Every snapshot is judged on [io], including one with no proxy entry: the first
+            // one is what dispatches the test. Hopping there also keeps the stream's teardown
+            // out of this callback - disconnect() is a blocking RPC, and tearing a client down
+            // from inside its own callback is a reentrancy hazard on the gomobile side.
+            post { onPingSnapshot(requestId, testedAtSec, delay) }
         }
 
         override fun connected() = Unit
@@ -1505,6 +1773,13 @@ class NexusPlugin : Plugin() {
         // urltest's own dial deadline is shorter than this; the margin covers a slow relay
         // plus one stream tick, so a node that is merely slow is not reported as broken.
         const val PING_TIMEOUT_MS = 12_000L
+
+        // How long a dispatched URL test can still finish inside the core: sing-box's 5s
+        // connect timeout plus its 15s request timeout, with margin. See pingBusyUntil.
+        const val PING_CORE_MAX_MS = 25_000L
+
+        /** Reject code of pingProxy while a test is (or may still be) running. */
+        const val PING_BUSY = "PING_BUSY"
 
         // Per-endpoint TCP handshake budget. Above ~3s a node is unusable in practice, and a
         // longer wait only makes the whole batch feel broken.

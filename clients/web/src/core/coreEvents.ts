@@ -1,4 +1,4 @@
-import { NexusCore, type ServiceStateEvent, type StatusMessage } from './plugin';
+import { NexusCore, type ServerProbeEvent, type ServiceStateEvent, type StatusMessage } from './plugin';
 
 /**
  * One Capacitor listener per event, for the lifetime of the page. React components subscribe
@@ -38,6 +38,9 @@ type EventMap = {
   serviceState: ServiceStateEvent;
   /** Result of NexusCore.pingProxy(). ok:false means the test failed or timed out. */
   proxyDelay: { delayMs: number; ok: boolean };
+  /** NexusCore.probeServers: one server's result, then one done per run. */
+  serverProbe: ServerProbeEvent;
+  serverProbeDone: { runId: number; cancelled: boolean };
 };
 
 type Handler<K extends keyof EventMap> = (payload: EventMap[K]) => void;
@@ -47,6 +50,8 @@ class CoreEventBridge {
     status: new Set(),
     serviceState: new Set(),
     proxyDelay: new Set(),
+    serverProbe: new Set(),
+    serverProbeDone: new Set(),
   };
 
   private wiring: Promise<void> | null = null;
@@ -71,6 +76,8 @@ class CoreEventBridge {
       await NexusCore.addListener('status', (payload) => this.emit('status', payload));
       await NexusCore.addListener('serviceState', (payload) => this.emit('serviceState', payload));
       await NexusCore.addListener('proxyDelay', (payload) => this.emit('proxyDelay', payload));
+      await NexusCore.addListener('serverProbe', (payload) => this.emit('serverProbe', payload));
+      await NexusCore.addListener('serverProbeDone', (payload) => this.emit('serverProbeDone', payload));
     })().catch((e) => {
       // Let a later subscriber retry rather than wedging the bridge permanently.
       this.wiring = null;

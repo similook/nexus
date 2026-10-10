@@ -6,11 +6,12 @@ import { QrScanner } from '../components/QrScanner';
 import { useToast } from '../components/Toast';
 import { useNexus } from '../core/NexusProvider';
 import type { SubscriptionRecord, UseSubscriptions } from '../core/useSubscriptions';
-import { extractConfigUris, type SubscriptionUserinfo } from '../core/subscription';
-import { endpointOf, isQuicProtocol, pingTone, type ServerNode } from '../data/servers';
+import { classifyImport, type SubscriptionUserinfo } from '../core/subscription';
+import { isQuicProtocol, pingTone, vpnLatencyTone, type ServerNode } from '../data/servers';
 import { formatTotal } from '../core/format';
 import { coreEvents } from '../core/coreEvents';
 import { NexusCore } from '../core/plugin';
+import { useServerTests, type DelayCell, type TcpCell, type TestAllSummary } from '../core/useServerTests';
 
 export function ServersView({
   selectedId,
@@ -27,13 +28,15 @@ export function ServersView({
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   /**
-   * Measured latency per node id, in milliseconds. -1 means unreachable.
+   * TCP and Delay per node id: two separate maps owned by useServerTests, never merged.
    *
    * DELIBERATELY NOT PERSISTED and not written onto the node. A latency figure is true for one
    * moment on one network; storing it would leave a stale number sitting next to a node the
    * user is choosing between, which is worse than "--".
    */
-  const [latency, setLatency] = useState<Record<string, number>>({});
+  const tests = useServerTests(subs.nodes, (summary: TestAllSummary) => {
+    if (!summary.cancelled) toast(`${summary.delayOk} of ${summary.delayTotal} working`);
+  });
 
   /** Which node the details/edit/share sheet is showing, and on which tab. */
   const [sheet, setSheet] = useState<{ node: ServerNode; tab: NodeSheetTab } | null>(null);
@@ -41,7 +44,6 @@ export function ServersView({
   const [sharing, setSharing] = useState<SubscriptionRecord | null>(null);
   const [scanning, setScanning] = useState(false);
   const totalNodes = subs.nodes.length;
-  const [testing, setTesting] = useState(false);
 
   /**
    * The live tunnel's own url-test result, which is a different measurement from the TCP
@@ -59,54 +61,32 @@ export function ServersView({
         const running = activeConfig === null
           ? undefined
           : subs.nodes.find((n) => n.config === activeConfig);
-        if (running) {
-          setLatency((prev) => ({ ...prev, [running.id]: ok ? delayMs : -1 }));
-        }
+        if (running) tests.recordLive(running.id, ok ? delayMs : null);
         toast(ok ? `${delayMs} ms through the tunnel` : 'No response through the tunnel', ok ? undefined : '⚠');
       }),
-    [activeConfig, subs.nodes, toast],
+    [activeConfig, subs.nodes, toast, tests.recordLive],
   );
 
   /**
-   * Test every node in the list.
+   * Test every node in the list - TCP and Delay, each for every server, independently.
    *
-   * This is a TCP handshake to each node's own server and port, run natively and concurrently.
-   * It does NOT switch the tunnel, and it does not go through the tunnel - the app process is
-   * excluded from the VPN, so the probes leave over the underlying network whether or not a
-   * tunnel is up. That is what makes testing thirty nodes cheap and non-disruptive.
+   * TCP is a direct handshake to each server (n/a for UDP-only protocols). Delay is each
+   * server's own config, handshake and authentication included, URL-tested by a short-lived
+   * core instance beside the tunnel. Neither switches, reconnects or goes through the tunnel,
+   * so this works connected or not and the running server is untouched. See useServerTests.
    *
-   * What it measures is reachability of the server, which is the useful thing when choosing
-   * between nodes. It cannot tell you the credentials are right; for the connected node, the
-   * per-row tap below asks the core itself.
+   * Tapping again while it runs cancels it.
    */
-  const handleTestAll = async () => {
-    const targets = subs.nodes
-      .map((node) => ({ node, endpoint: endpointOf(node) }))
-      .filter((t): t is { node: ServerNode; endpoint: { server: string; port: number } } =>
-        t.endpoint !== null,
-      )
-      .map(({ node, endpoint }) => ({ id: node.id, ...endpoint }));
-
-    if (targets.length === 0) {
+  const handleTestAll = () => {
+    if (tests.progress !== null) {
+      tests.cancel();
+      return;
+    }
+    if (subs.nodes.length === 0) {
       toast('Nothing to test yet', 'ℹ');
       return;
     }
-
-    setTesting(true);
-    try {
-      const { results } = await NexusCore.tcpPing({ targets });
-      setLatency((prev) => {
-        const next = { ...prev };
-        for (const { id, ms } of results) next[id] = ms;
-        return next;
-      });
-      const reachable = results.filter((r) => r.ms >= 0).length;
-      toast(`${reachable} of ${results.length} reachable`);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Test failed', '⚠');
-    } finally {
-      setTesting(false);
-    }
+    tests.start(subs.nodes);
   };
 
   /**
@@ -131,17 +111,16 @@ export function ServersView({
    * uses rather than guessing.
    */
   const handleScanned = (text: string) => {
-    const trimmed = text.trim();
-    if (/^https?:\/\/\S+$/i.test(trimmed)) {
-      void handleAdd(trimmed);
+    const detected = classifyImport(text);
+    if (detected.kind === 'subscription') {
+      void handleAdd(detected.url);
       return;
     }
-    const uris = extractConfigUris(trimmed);
-    if (uris.length === 0) {
-      toast('That QR code is not a config or subscription link', '⚠');
+    if (detected.kind === 'configs') {
+      handleAddConfigs(detected.uris);
       return;
     }
-    handleAddConfigs(uris);
+    toast('That QR code is not a config or subscription link', '⚠');
   };
 
   /** Ask the core for the real, proxied latency of the node it is running. */
@@ -249,15 +228,21 @@ export function ServersView({
           */}
           <div className="flex items-center gap-2">
           <button
-            onClick={() => void handleTestAll()}
-            disabled={testing}
-            title="TCP handshake to every node — does not touch the active tunnel"
+            onClick={handleTestAll}
+            aria-label={
+              tests.progress !== null
+                ? `Testing ${tests.progress.done} of ${tests.progress.total}, tap to cancel`
+                : 'Test all servers'
+            }
+            title="TCP and Delay for every server, each through its own config — never switches the tunnel"
             className="text-xs text-brand-orange hover:text-brand-orange-glow font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-brand-surface border border-brand-border active:scale-95 transition-all disabled:opacity-50"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
             </svg>
-            <span>{testing ? 'Testing…' : 'Test All'}</span>
+            <span className="tabular-nums">
+              {tests.progress !== null ? `Testing ${tests.progress.done}/${tests.progress.total} ✕` : 'Test All'}
+            </span>
           </button>
           {connection === 'connected' && (
             <button
@@ -372,7 +357,9 @@ export function ServersView({
                       node={node}
                       selected={node.id === selectedId}
                       onSelect={handleSelect}
-                      measuredMs={latency[node.id] ?? null}
+                      tcp={tests.tcp[node.id]}
+                      delay={tests.delay[node.id]}
+                      onReason={(reason) => toast(reason, '⚠')}
                       onInspect={(n, tab) => setSheet({ node: n, tab })}
                     />
                   ))}
@@ -397,7 +384,9 @@ export function ServersView({
                     node={node}
                     selected={node.id === selectedId}
                     onSelect={handleSelect}
-                    measuredMs={latency[node.id] ?? null}
+                    tcp={tests.tcp[node.id]}
+                    delay={tests.delay[node.id]}
+                    onReason={(reason) => toast(reason, '⚠')}
                     onInspect={(n, tab) => setSheet({ node: n, tab })}
                   />
                 </div>
@@ -570,20 +559,22 @@ function NodeRow({
   node,
   selected,
   onSelect,
-  measuredMs = null,
+  tcp,
+  delay,
+  onReason,
   onInspect,
 }: {
   node: ServerNode;
   selected: boolean;
   onSelect: (node: ServerNode) => void;
-  /** Live figure from the core's url test; overrides the stored one while it is fresh. */
-  measuredMs?: number | null;
+  /** TCP: Test All's direct handshake; overrides the stored one while it is fresh. */
+  tcp?: TcpCell;
+  /** Delay: Test All's per-server probe, or Live's URL test through the tunnel. */
+  delay?: DelayCell;
+  /** Show why a Delay failed (sanitized: Timeout, Refused, Rejected...). */
+  onReason: (reason: string) => void;
   onInspect: (node: ServerNode, tab: NodeSheetTab) => void;
 }) {
-  // -1 is the native probe's "handshake did not complete". Rendering it as a number would be
-  // a lie with a minus sign; it is a reachability answer, so it gets a word.
-  const measuredFailed = measuredMs !== null && measuredMs < 0;
-  const ping = measuredFailed ? null : (measuredMs ?? node.pingMs);
   return (
     /*
       A div wrapping a button, not one big button.
@@ -648,14 +639,16 @@ function NodeRow({
         </span>
       </button>
 
-      <span
-        className={`text-[11px] font-mono font-medium px-2 py-0.5 shrink-0 rounded-md border ${
-          measuredFailed
-            ? 'text-rose-400 bg-rose-950/50 border-rose-800/40'
-            : pingTone(ping)
-        }`}
-      >
-        {measuredFailed ? 'n/a' : ping === null ? '--' : `${ping}ms`}
+      {/* TCP (direct handshake) and Delay (URL test through the tunnel) - two different
+          measurements, never merged, each on its own colour bands. Stacked, compact, and no
+          taller than the name block, so the row keeps its height and the host keeps its width. */}
+      <span className="shrink-0 grid grid-cols-[auto_auto] items-center gap-x-1 gap-y-0.5">
+        <RowLatency label="TCP" {...tcpChip(tcp, node.pingMs)} />
+        <RowLatency
+          label="Delay"
+          {...delayChip(delay)}
+          onClick={delay?.kind === 'failed' ? () => onReason(`Delay: ${delay.reason}`) : undefined}
+        />
       </span>
 
       <IconBtn
@@ -669,5 +662,69 @@ function NodeRow({
         path="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z"
       />
     </div>
+  );
+}
+
+const FAILED_TONE = 'text-rose-400 bg-rose-950/50 border-rose-800/40';
+const MUTED_TONE = pingTone(null);
+
+/** `--` untested, `…` testing, a number (TCP bands), `✕` failed, `n/a` UDP-only server. */
+function tcpChip(cell: TcpCell | undefined, stored: number | null): { text: string; tone: string } {
+  if (cell === undefined) {
+    return stored === null ? { text: '--', tone: MUTED_TONE } : { text: `${stored}`, tone: pingTone(stored) };
+  }
+  switch (cell.kind) {
+    case 'testing':
+      return { text: '…', tone: MUTED_TONE };
+    case 'ms':
+      return { text: `${cell.ms}`, tone: pingTone(cell.ms) };
+    case 'failed':
+      return { text: '✕', tone: FAILED_TONE };
+    case 'na':
+      return { text: 'n/a', tone: MUTED_TONE };
+  }
+}
+
+/** `--` untested, `…` testing, a number (Delay bands), `✕` failed. */
+function delayChip(cell: DelayCell | undefined): { text: string; tone: string } {
+  if (cell === undefined) return { text: '--', tone: MUTED_TONE };
+  switch (cell.kind) {
+    case 'testing':
+      return { text: '…', tone: MUTED_TONE };
+    case 'ms':
+      return { text: `${cell.ms}`, tone: vpnLatencyTone(cell.ms) };
+    case 'failed':
+      return { text: '✕', tone: FAILED_TONE };
+  }
+}
+
+/**
+ * One labelled figure of a row's TCP/Delay pair, in milliseconds without the unit (the labels
+ * say what it is, and the width goes to the server name). A minimum width keeps the row from
+ * shifting as `…` turns into a number. Tappable only when it has a reason to show.
+ */
+function RowLatency({
+  label,
+  text,
+  tone,
+  onClick,
+}: {
+  label: string;
+  text: string;
+  tone: string;
+  onClick?: () => void;
+}) {
+  const chip = `min-w-[24px] text-center text-[9px] font-mono font-semibold leading-none px-1 py-px rounded border ${tone}`;
+  return (
+    <>
+      <span className="text-[9px] font-semibold text-brand-muted text-right leading-none">{label}</span>
+      {onClick ? (
+        <button type="button" onClick={onClick} aria-label={`${label} failed: show why`} className={chip}>
+          {text}
+        </button>
+      ) : (
+        <span className={chip}>{text}</span>
+      )}
+    </>
   );
 }

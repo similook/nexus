@@ -36,6 +36,62 @@ export type ServiceState = 'stopped' | 'starting' | 'started' | 'unknown';
  * the number bench/B-03 cares about — but they belong on a diagnostics screen, not the home
  * view.
  */
+/**
+ * The server the CORE reports it is running - read from the config it is actually running, never
+ * from the UI's selection. The Quick Settings tile and boot start whatever the core last ran, so
+ * the running server and the selected one can differ; anything that says "this tunnel goes via X"
+ * or measures X as the active server must use this.
+ *
+ * `name` is the node's display name when the start carried one (boot starts do not).
+ */
+export interface RunningServer {
+  server: string;
+  port: number;
+  name: string | null;
+  /** sing-box outbound type, e.g. "vless". */
+  protocol: string | null;
+}
+
+/**
+ * Result of pingProxy(). `delayMs` is sing-box's URL test through the running proxy outbound
+ * (a fresh HTTPS request), valid only when `ok`. `discarded`: the test was abandoned - the
+ * tunnel stopped, the app left the foreground, or the running server changed - and the result
+ * belongs to nothing on screen. `testedAt` is epoch milliseconds (second precision), 0 when
+ * there is no result.
+ */
+export interface ProxyTestResult {
+  ok: boolean;
+  delayMs: number;
+  testedAt: number;
+  discarded: boolean;
+}
+
+/**
+ * Outcome of one server's probe (probeServers). Only these categories ever cross the bridge;
+ * raw errors name hosts and addresses and stay in the core.
+ */
+export type ServerProbeStatus =
+  | 'ok'
+  | 'timeout'
+  | 'refused'
+  | 'unreachable'
+  | 'dns_failed'
+  | 'handshake_failed'
+  | 'rejected'
+  | 'config_invalid'
+  | 'cancelled'
+  | 'failed';
+
+/** One server's result from probeServers. `delayMs` is meaningful only when status is 'ok'. */
+export interface ServerProbeEvent {
+  runId: number;
+  serverId: string;
+  /** Echo of the fingerprint the caller sent with this server's config. */
+  fingerprint: string;
+  status: ServerProbeStatus;
+  delayMs: number;
+}
+
 export interface StatusMessage {
   /**
    * When the CORE started, epoch milliseconds, as the core reports it. 0 means unknown.
@@ -44,6 +100,8 @@ export interface StatusMessage {
    * command stream has finished reconnecting and would otherwise see 0.
    */
   coreStartedAt?: number;
+  /** The running server as the core reports it; null when unknown. Rides on every tick. */
+  runningServer?: RunningServer | null;
   /**
    * False when the core is not producing traffic counters at all (it depends on the
    * with_clash_api build tag). The zeros alongside it then mean "unknown", NOT "idle" — render
@@ -63,6 +121,8 @@ export interface StatusMessage {
 export interface ServiceStateEvent {
   state: ServiceState;
   reason?: string;
+  /** Present on a core-reported start: which server it started. */
+  runningServer?: RunningServer | null;
 }
 
 export interface ClashModeEvent {
@@ -129,6 +189,8 @@ export type StatusSnapshot = Partial<StatusMessage> & {
    * because the UI's lifetime is shorter than the tunnel's.
    */
   coreStartedAt?: number;
+  /** The core's current word on which server is running; null when none or not yet known. */
+  runningServer?: RunningServer | null;
 };
 
 // ---------------------------------------------------------------------------------------
@@ -196,13 +258,16 @@ export interface NexusCorePlugin {
   urlTest(options: { group: string }): Promise<void>;
 
   /**
-   * Measure the latency of the RUNNING proxy outbound. Requires the core to be started.
+   * Measure the latency of the RUNNING proxy outbound, THROUGH it: sing-box's URL test, run
+   * by the core over the outbound its traffic uses. Requires the core to be started.
    *
-   * Resolves as soon as the test is dispatched, not when it finishes - the number arrives on
-   * the "proxyDelay" event. There is exactly one proxy outbound in a generated config, so this
-   * measures the selected node and nothing else; it is not a sweep over the server list.
+   * Resolves when this test has a result - never with an older one the core still held.
+   * Unless `silent`, the result is also sent on the "proxyDelay" event. One test at a time:
+   * while one is (or may still be) running this rejects with code 'PING_BUSY'. There is
+   * exactly one proxy outbound in a generated config, so this measures the running node and
+   * nothing else; it is not a sweep over the server list.
    */
-  pingProxy(): Promise<void>;
+  pingProxy(options?: { silent?: boolean }): Promise<ProxyTestResult>;
 
   /**
    * TCP handshake latency to a batch of proxy endpoints, in milliseconds. `ms: -1` means the
@@ -218,6 +283,25 @@ export interface NexusCorePlugin {
   tcpPing(options: {
     targets: Array<{ id: string; server: string; port: number }>;
   }): Promise<{ results: Array<{ id: string; ms: number }> }>;
+
+  /**
+   * Delay for EVERY server: each one's own config gets a full handshake and the same URL test
+   * the Live path uses, in a short-lived core instance in the app process. No inbound, no TUN,
+   * no listener; the running tunnel, its core and the active server are never touched, so this
+   * works connected or not.
+   *
+   * Resolves at once. Results stream as "serverProbe" events, one per server, and the run ends
+   * with exactly one "serverProbeDone". A new run cancels the previous one. User-initiated only
+   * (Test All): never on a timer, on resume or in the background - the native side cancels a
+   * run when the app leaves the foreground.
+   */
+  probeServers(options: {
+    runId: number;
+    targets: Array<{ id: string; fingerprint: string; config: string }>;
+  }): Promise<{ runId: number }>;
+
+  /** Cancel run `runId`. Its "serverProbeDone" (cancelled: true) follows. */
+  cancelProbe(options: { runId: number }): Promise<void>;
 
   /**
    * GET a URL THROUGH the running tunnel.
@@ -289,10 +373,22 @@ export interface NexusCorePlugin {
     listener: (event: ClashModeEvent) => void,
   ): Promise<PluginListenerHandle>;
 
-  /** Result of pingProxy(). `ok: false` with delayMs 0 means the test timed out or failed. */
+  /** Result of a non-silent pingProxy(). `ok: false` with delayMs 0 means it timed out or failed. */
   addListener(
     eventName: 'proxyDelay',
     listener: (event: { delayMs: number; ok: boolean }) => void,
+  ): Promise<PluginListenerHandle>;
+
+  /** One server's probeServers result. */
+  addListener(
+    eventName: 'serverProbe',
+    listener: (event: ServerProbeEvent) => void,
+  ): Promise<PluginListenerHandle>;
+
+  /** A probeServers run ended: every result it will ever send has been sent. */
+  addListener(
+    eventName: 'serverProbeDone',
+    listener: (event: { runId: number; cancelled: boolean }) => void,
   ): Promise<PluginListenerHandle>;
 
   /**

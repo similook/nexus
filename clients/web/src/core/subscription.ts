@@ -855,6 +855,112 @@ export function extractConfigUris(text: string): string[] {
   return decoded ? [...new Set(scan(decoded))] : [];
 }
 
+/** What a paste or a scanned QR code turned out to be. */
+export type ImportKind =
+  | { kind: 'empty' }
+  | { kind: 'subscription'; url: string; insecure: boolean }
+  | { kind: 'configs'; uris: string[] }
+  | { kind: 'unknown' };
+
+/**
+ * Classify import text - the Add box and the QR scanner share this, so a link that is accepted
+ * in one is accepted in the other.
+ *
+ * Order matters:
+ *   1. The WHOLE input is an http(s) URL: a subscription. Checked first and against the whole
+ *      input, because some panels hand out links with a proxy scheme inside the query string -
+ *      scanning for URIs first would import that fragment instead of fetching the list.
+ *   2. A subscription link wrapped in another client's scheme (see unwrapSubscriptionLink).
+ *   3. Config URIs anywhere in the text: configs. A channel post that mentions a t.me link next
+ *      to its configs is a config paste, not a subscription.
+ *   4. Exactly ONE http(s) URL inside other text ("Your subscription: https://…", or a QR whose
+ *      text carries a label): that URL. Two or more is ambiguous and is not guessed at.
+ *
+ * Only http:// and https:// ever come out as a subscription; nothing here logs the URL.
+ */
+export function classifyImport(raw: string): ImportKind {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { kind: 'empty' };
+  const subscription = (url: string): ImportKind => ({ kind: 'subscription', url, insecure: isInsecureUrl(url) });
+
+  if (/^https?:\/\/\S+$/i.test(trimmed)) return subscription(trimmed);
+
+  const unwrapped = unwrapSubscriptionLink(trimmed);
+  if (unwrapped !== null) return subscription(unwrapped);
+
+  const uris = extractConfigUris(trimmed);
+  if (uris.length > 0) return { kind: 'configs', uris };
+
+  const embedded = [
+    ...new Set((trimmed.match(EMBEDDED_HTTP_URL) ?? []).map((url) => url.replace(/[),.;'"]+$/, ''))),
+  ].filter(isHttpUrl);
+  if (embedded.length === 1) return subscription(embedded[0]);
+
+  return { kind: 'unknown' };
+}
+
+/** An http(s) URL inside other text. Regex LITERAL - see URI_TERMINATOR for why not a string. */
+const EMBEDDED_HTTP_URL = /https?:\/\/[^\s<>"'`]+/gi;
+
+/** Clients whose QR codes and links carry a subscription as `?url=<encoded>`. */
+const URL_PARAM_WRAPPERS = new Set(['sing-box', 'clash', 'clashmeta', 'v2rayng', 'hiddify']);
+
+/**
+ * The subscription URL inside another client's import link, or null.
+ *
+ *   sub://<base64 of the URL>[#remark]                     v2rayN / v2rayNG
+ *   sing-box://import-remote-profile?url=<encoded>[#name]   sing-box
+ *   clash://install-config?url=<encoded>                     Clash (and clashmeta://)
+ *   v2rayng://install-config?url=… / install-sub?url=…       v2rayNG
+ *   hiddify://import/<url>[#name]                            Hiddify
+ *
+ * Whatever a wrapper claims, only an http(s) URL is ever returned (isHttpUrl): a wrapper cannot
+ * smuggle in file:, content:, data: or any other scheme.
+ */
+function unwrapSubscriptionLink(input: string): string | null {
+  // An import link is one token; anything with whitespace is prose, handled by the caller.
+  if (/\s/.test(input)) return null;
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(input)?.[1].toLowerCase();
+  if (!scheme) return null;
+  const rest = input.slice(scheme.length + 3);
+
+  let candidate: string | null = null;
+  if (scheme === 'sub') {
+    try {
+      candidate = base64Decode(rest.split('#')[0]);
+    } catch {
+      return null;
+    }
+  } else if (scheme === 'hiddify' && /^import\//i.test(rest)) {
+    const path = rest.slice('import/'.length).split('#')[0];
+    candidate = /^https?%3a/i.test(path) ? safeDecodeURIComponent(path) : path;
+  } else if (URL_PARAM_WRAPPERS.has(scheme)) {
+    const query = rest.includes('?') ? rest.slice(rest.indexOf('?') + 1).split('#')[0] : '';
+    candidate = new URLSearchParams(query).get('url');
+  }
+
+  const url = candidate?.trim() ?? '';
+  return isHttpUrl(url) ? url : null;
+}
+
+function isHttpUrl(text: string): boolean {
+  if (!/^https?:\/\/\S+$/i.test(text)) return false;
+  try {
+    const url = new URL(text);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function safeDecodeURIComponent(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 export function parseSingleConfig(uri: string): ServerNode {
   const trimmed = uri.trim();
   if (!trimmed) throw new SubscriptionError('Paste a config link first');

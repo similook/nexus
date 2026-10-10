@@ -1,12 +1,14 @@
+import { useMemo } from 'react';
 import { useNexus } from '../core/NexusProvider';
 import { formatSpeedMB, formatTotal, formatUptime } from '../core/format';
 import { isQuicProtocol, type ServerNode } from '../data/servers';
+import type { RunningServer } from '../core/plugin';
 import { AdBanner } from '../components/AdBanner';
 import { UpdateBanner } from '../components/UpdateBanner';
 import { useLivePing } from '../core/useLivePing';
 import { useNetworkStatus } from '../core/useNetworkStatus';
 import type { NetworkStatusState, NetworkTransport } from '../core/plugin';
-import { pingTone } from '../data/servers';
+import { pingTone, vpnLatencyTone } from '../data/servers';
 
 /**
  * Home view.
@@ -25,9 +27,37 @@ import { pingTone } from '../data/servers';
  * timer above the bridge undoes the design (see useNexusCore.ts).
  */
 
+/**
+ * What the card calls the running server: its node name when the start carried one, otherwise
+ * protocol and endpoint (boot starts carry no name) - the same fallback as the notification.
+ */
+function runningLabel(running: RunningServer): string {
+  if (running.name) return running.name;
+  const protocol = (running.protocol ?? '').toUpperCase();
+  return `${protocol ? `${protocol} · ` : ''}${running.server}:${running.port}`;
+}
+
+/**
+ * A probe target for useLivePing built from the core's running-server identity.
+ *
+ * useLivePing reads only `id` and the proxy endpoint in `config` (endpointOf); the other fields
+ * exist for the type and are never displayed. The id IS the endpoint, so the hook re-probes
+ * exactly when the running endpoint changes.
+ */
+function probeTargetFor(running: RunningServer): ServerNode {
+  return {
+    id: `running:${running.server}:${running.port}`,
+    name: runningLabel(running),
+    flag: '🌐',
+    country: running.server,
+    transport: '',
+    protocol: 'VLESS',
+    pingMs: null,
+    config: JSON.stringify({ outbounds: [{ tag: 'proxy', server: running.server, server_port: running.port }] }),
+  };
+}
+
 export function HomeView({ node }: { node: ServerNode | null }) {
-  // Polled only while this screen is in the foreground - see useLivePing.
-  const livePing = useLivePing(node);
   // Push-driven, no timer. Describes the PHONE's link, never the tunnel - see plugin.ts.
   const network = useNetworkStatus();
   const {
@@ -40,10 +70,50 @@ export function HomeView({ node }: { node: ServerNode | null }) {
     uptimeSeconds,
     trafficAvailable,
     toggle,
+    runningServer,
   } = useNexus();
 
   const isConnected = connection === 'connected';
   const isBusy = connection === 'connecting';
+
+  /*
+   * WHICH SERVER THE CARD DESCRIBES.
+   *
+   * Connected: the one the CORE says it is running (NexusApi.runningServer) - never the
+   * selection. The Quick Settings tile and boot start whatever the core last ran, so "selected"
+   * and "running" can be different servers, and showing the selection here put one server's
+   * name and latency over a tunnel going through another.
+   *
+   * Connected but the core has not said: an explicit unknown. Falling back to the selection
+   * would be exactly the mislabel this exists to remove.
+   *
+   * Not connected: the selection - the server Connect will start.
+   */
+  const running = isConnected ? runningServer : null;
+  const runningUnknown = isConnected && runningServer === null;
+  const runningProbe = useMemo(() => (running === null ? null : probeTargetFor(running)), [running]);
+
+  // Polled only while this screen is in the foreground - see useLivePing. Connected: "Delay",
+  // a URL test through the running proxy, never the direct handshake (that measures only the
+  // first hop). Disconnected: "TCP", the direct handshake to the selection.
+  const livePing = useLivePing(isConnected ? runningProbe : node, isConnected ? 'vpn' : 'server');
+
+  const cardFlag = running !== null || runningUnknown ? '🌐' : (node?.flag ?? '🌐');
+  const cardName = running !== null
+    ? runningLabel(running)
+    : runningUnknown
+      ? 'Running server unknown'
+      : (node?.name ?? 'No server selected');
+  const cardDetail = running !== null
+    ? `${running.server}:${running.port}${running.protocol ? ` • ${running.protocol.toUpperCase()}` : ''}`
+    : runningUnknown
+      ? 'The core has not reported which server it is running'
+      : node === null
+        ? 'Servers tab → Add Subscription'
+        : `${node.country} • ${node.transport}`;
+  const cardQuic = running !== null
+    ? running.protocol === 'hysteria2' || running.protocol === 'tuic'
+    : !isConnected && node !== null && isQuicProtocol(node.protocol);
 
   // 'CANCEL' while busy, not 'CONNECTING'.
   //
@@ -62,10 +132,12 @@ export function HomeView({ node }: { node: ServerNode | null }) {
 
   const subtitle =
     error ??
-    (node === null
-      ? 'Add a subscription to get started'
-      : isConnected
-        ? `Routed via ${node.name}`
+    (isConnected
+      ? running !== null
+        ? `Routed via ${runningLabel(running)}`
+        : 'Routed via a server the app cannot identify'
+      : node === null
+        ? 'Add a subscription to get started'
         : 'Tap to establish encrypted tunnel');
 
   return (
@@ -76,13 +148,13 @@ export function HomeView({ node }: { node: ServerNode | null }) {
       {/* Active node card */}
       <div className="shrink-0 flex items-center justify-between gap-2 p-3 rounded-2xl bg-brand-surface border border-brand-border mb-4">
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="text-xl leading-none">{node?.flag ?? '🌐'}</span>
+          <span className="text-xl leading-none">{cardFlag}</span>
           <span className="min-w-0">
             <span className="flex items-center gap-1.5">
               <span className="text-sm font-bold text-white truncate">
-                {node?.name ?? 'No server selected'}
+                {cardName}
               </span>
-              {node !== null && isQuicProtocol(node.protocol) && (
+              {cardQuic && (
                 <span
                   title="Higher idle battery use — keeps a QUIC connection alive"
                   className="px-1 py-px shrink-0 rounded text-[9px] font-mono font-semibold bg-amber-950/60 border border-amber-800/50 text-amber-400"
@@ -92,16 +164,28 @@ export function HomeView({ node }: { node: ServerNode | null }) {
               )}
             </span>
             <span className="block text-[10px] text-brand-muted truncate">
-              {node === null ? 'Servers tab → Add Subscription' : `${node.country} • ${node.transport}`}
+              {cardDetail}
             </span>
           </span>
         </div>
-        <span
-          className={`text-[11px] font-mono font-medium px-2 py-0.5 shrink-0 rounded-md border transition-colors ${pingTone(
-            livePing,
-          )}`}
-        >
-          {livePing === null ? '--' : `${livePing}ms`}
+        {/* Labelled, because the two numbers measure different paths and must not be compared. */}
+        <span className="flex flex-col items-end gap-0.5 shrink-0">
+          <span className="text-[9px] font-semibold text-brand-muted tracking-wide">
+            {isConnected ? 'Delay' : 'TCP'}
+          </span>
+          <span
+            className={`text-[11px] font-mono font-medium px-2 py-0.5 rounded-md border transition-colors ${(isConnected
+              ? vpnLatencyTone
+              : pingTone)(typeof livePing === 'number' ? livePing : null)}`}
+          >
+            {livePing === 'pending'
+              ? '…'
+              : livePing === 'failed'
+                ? 'n/a'
+                : livePing === null
+                  ? '--'
+                  : `${livePing}ms`}
+          </span>
         </span>
       </div>
 

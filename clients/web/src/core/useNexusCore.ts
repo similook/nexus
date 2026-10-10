@@ -4,6 +4,7 @@ import type { PluginListenerHandle } from '@capacitor/core';
 import { coreEvents } from './coreEvents';
 import {
   NexusCore,
+  type RunningServer,
   type ServiceState,
   type StatusMessage,
   type StatusSnapshot,
@@ -60,6 +61,13 @@ export interface NexusApi extends NexusState {
    * must use this, never the selection - the two diverge.
    */
   activeConfig: string | null;
+  /**
+   * The server the CORE reports it is running, whoever started the tunnel (the app, the Quick
+   * Settings tile, boot) - or null when nothing runs or the core has not said yet. This is the
+   * only thing the UI may present as "the server this tunnel goes through"; the selection is
+   * what Connect would start, which is not the same thing.
+   */
+  runningServer: RunningServer | null;
   connect: (config: string) => Promise<void>;
   disconnect: () => Promise<void>;
   /** Single toggle for a one-button UI. Ignores taps while a transition is in flight. */
@@ -183,6 +191,22 @@ export function useNexusCore(): NexusApi {
   const pendingConfigRef = useRef<string | null>(null);
 
   /**
+   * See NexusApi.runningServer. Set only from what the core reports (status ticks, getStatus,
+   * a core-reported start); cleared by any confirmed stop. Compared by value so an unchanged
+   * identity on every tick keeps the same object, and consumers keyed on it do not re-run.
+   */
+  const [runningServer, setRunningServer] = useState<RunningServer | null>(null);
+  const applyRunningServer = useCallback((next: RunningServer | null) => {
+    setRunningServer((prev) =>
+      prev !== null && next !== null &&
+      prev.server === next.server && prev.port === next.port &&
+      prev.name === next.name && prev.protocol === next.protocol
+        ? prev
+        : next,
+    );
+  }, []);
+
+  /**
    * Origin for the uptime clock, on the performance.now() timeline.
    *
    * performance.now() rather than Date.now(): a wall-clock change (NTP sync, timezone, the
@@ -289,6 +313,10 @@ export function useNexusCore(): NexusApi {
     // winning a race against the command client reconnecting.
     anchorToCore(status.coreStartedAt);
 
+    // The core's word on which server is running rides on every tick and on getStatus. Absent
+    // (an older payload) means "no news", not "nothing running".
+    if (status.runningServer !== undefined) applyRunningServer(status.runningServer ?? null);
+
     setState((prev) => ({
       ...prev,
       trafficAvailable: status.trafficAvailable ?? prev.trafficAvailable,
@@ -311,7 +339,7 @@ export function useNexusCore(): NexusApi {
           : [...prev.slice(prev.length - HISTORY_CAPACITY + 1), value],
       );
     }
-  }, [anchorToCore]);
+  }, [anchorToCore, applyRunningServer]);
 
   const applyServiceState = useCallback((serviceState: ServiceState, reason?: string) => {
     // A cancelled status stream is not a stopped tunnel. Downgrade it to 'unknown', which is
@@ -375,12 +403,15 @@ export function useNexusCore(): NexusApi {
       pendingConfigRef.current = null;
     }
 
+    // A confirmed stop means nothing is running - never keep presenting the old server.
+    if (serviceState === 'stopped') applyRunningServer(null);
+
     // Record the teardown for switchTo, regardless of what the UI was told to render.
     if (serviceState === 'stopped') stopConfirmedRef.current = true;
 
     // The core has settled either way, so the watchdog has nothing left to catch.
     if (serviceState === 'started' || serviceState === 'stopped') clearWatchdog();
-  }, [clearWatchdog]);
+  }, [clearWatchdog, applyRunningServer]);
 
   const reconcile = useCallback(async () => {
     try {
@@ -412,9 +443,11 @@ export function useNexusCore(): NexusApi {
     // an unguarded indexOf, so an async removal that misses deletes a live listener instead of
     // doing nothing, and StrictMode plus Fast Refresh reliably trigger it.
     const offStatus = coreEvents.subscribe('status', applyStatus);
-    const offServiceState = coreEvents.subscribe('serviceState', (e) =>
-      applyServiceState(e.state, e.reason),
-    );
+    const offServiceState = coreEvents.subscribe('serviceState', (e) => {
+      applyServiceState(e.state, e.reason);
+      // A core-reported start names the server it started.
+      if (e.runningServer !== undefined) applyRunningServer(e.runningServer ?? null);
+    });
 
     // Initial state, before the first tick arrives.
     void reconcile();
@@ -423,7 +456,7 @@ export function useNexusCore(): NexusApi {
       offStatus();
       offServiceState();
     };
-  }, [applyStatus, applyServiceState, reconcile]);
+  }, [applyStatus, applyServiceState, applyRunningServer, reconcile]);
 
   // --- resume reconciliation -----------------------------------------------------------
 
@@ -587,6 +620,7 @@ export function useNexusCore(): NexusApi {
     try {
       await NexusCore.stop();
       connectedAtRef.current = null;
+      applyRunningServer(null);
       setState({ ...INITIAL });
       setHistory([]);
     } catch (e) {
@@ -709,5 +743,5 @@ export function useNexusCore(): NexusApi {
     return lines;
   }, []);
 
-  return { ...state, activeConfig, connect, disconnect, toggle, switchTo, readLogs, history };
+  return { ...state, activeConfig, runningServer, connect, disconnect, toggle, switchTo, readLogs, history };
 }

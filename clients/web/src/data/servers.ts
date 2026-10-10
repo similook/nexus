@@ -151,13 +151,32 @@ export function endpointOf(node: ServerNode): { server: string; port: number } |
  * here and it is Hysteria2, which per ADR-0001 §2.1 is the most expensive protocol at idle.
  * Ranking purely on ping quietly steers every user onto the worst option for battery. The ⚡
  * badge is a stopgap; a real battery-cost indicator is ADR-0001 §5.1 and is not built yet.
+ *
+ * For SERVER latency: one direct TCP handshake to the node's own endpoint - a single first-hop
+ * round trip. Never use it for VPN latency; see vpnLatencyTone.
  */
 export function pingTone(pingMs: number | null): string {
+  return latencyTone(pingMs, 70, 150);
+}
+
+/**
+ * Latency colour for VPN latency: sing-box's URL test through the running proxy outbound.
+ *
+ * That is about two end-to-end round trips plus the server's own hop to the target - roughly
+ * 1.8x the real round trip on the paths measured - so it needs its own bands. pingTone's are
+ * for a single direct handshake and would paint every healthy VPN path red.
+ */
+export function vpnLatencyTone(ms: number | null): string {
+  return latencyTone(ms, 400, 800);
+}
+
+/** Green below `goodBelow` ms, amber below `fairBelow`, red from there. */
+function latencyTone(ms: number | null, goodBelow: number, fairBelow: number): string {
   // Negative is the native probe's failure sentinel, not a latency. Callers render it as text,
   // but colour it as bad in case one forgets.
-  if (pingMs === null || pingMs < 0) return 'text-brand-muted bg-brand-navy border-brand-border';
-  if (pingMs < 70) return 'text-emerald-400 bg-emerald-950/50 border-emerald-800/40';
-  if (pingMs < 150) return 'text-amber-400 bg-amber-950/50 border-amber-800/40';
+  if (ms === null || ms < 0) return 'text-brand-muted bg-brand-navy border-brand-border';
+  if (ms < goodBelow) return 'text-emerald-400 bg-emerald-950/50 border-emerald-800/40';
+  if (ms < fairBelow) return 'text-amber-400 bg-amber-950/50 border-amber-800/40';
   return 'text-rose-400 bg-rose-950/50 border-rose-800/40';
 }
 

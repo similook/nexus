@@ -4,6 +4,7 @@ import type {
   InstallInfo,
   NetworkStatusEvent,
   NexusCorePlugin,
+  ProxyTestResult,
   ServiceState,
   StatusMessage,
   StatusSnapshot,
@@ -74,7 +75,10 @@ export class NexusCoreWeb extends WebPlugin implements NexusCorePlugin {
 
   async selectOutbound(_options: { group: string; outbound: string }): Promise<void> {}
   async urlTest(_options: { group: string }): Promise<void> {}
-  async pingProxy(): Promise<void> {}
+  async pingProxy(_options?: { silent?: boolean }): Promise<ProxyTestResult> {
+    // No core in the browser, so no tunnel to measure.
+    return { ok: false, delayMs: 0, testedAt: 0, discarded: false };
+  }
   async tcpPing(options: {
     targets: Array<{ id: string; server: string; port: number }>;
   }): Promise<{ results: Array<{ id: string; ms: number }> }> {
@@ -82,6 +86,16 @@ export class NexusCoreWeb extends WebPlugin implements NexusCorePlugin {
     // plausible number, which would make the web build lie about something measurable.
     return { results: options.targets.map((t) => ({ id: t.id, ms: -1 })) };
   }
+  async probeServers(options: {
+    runId: number;
+    targets: Array<{ id: string; fingerprint: string; config: string }>;
+  }): Promise<{ runId: number }> {
+    // No core in the browser: end the run with no results, so every row stays "untested"
+    // rather than showing an invented number.
+    queueMicrotask(() => this.notifyListeners('serverProbeDone', { runId: options.runId, cancelled: false }));
+    return { runId: options.runId };
+  }
+  async cancelProbe(_options: { runId: number }): Promise<void> {}
   async fetchViaTunnel(_options: {
     url: string;
     headers?: Record<string, string>;
