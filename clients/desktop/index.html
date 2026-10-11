@@ -1,0 +1,18 @@
+<!doctype html>
+<html class="dark" lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      No viewport-fit=cover and no user-scalable=no, unlike clients/web/index.html. Both exist
+      for phone hardware: safe-area insets resolve to 0px here, and pinch-zoom is a legitimate
+      accessibility affordance on a desktop window rather than an accident.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Nexus</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

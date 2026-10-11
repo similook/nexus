@@ -1,0 +1,17 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "beforeDevCommand": "npm run build:nexusd && npm run dev",
+    "beforeBuildCommand": "npm run build && npm run build:nexusd"
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "externalBin": ["binaries/nexusd"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

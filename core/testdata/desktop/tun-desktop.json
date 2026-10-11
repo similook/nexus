@@ -1,0 +1,46 @@
+{
+  "log": { "level": "info", "timestamp": true },
+  "dns": {
+    "servers": [
+      { "type": "fakeip", "tag": "dns-fake", "inet4_range": "198.18.0.0/15" },
+      { "type": "https", "tag": "dns-proxy", "server": "8.8.8.8", "detour": "proxy" },
+      { "type": "https", "tag": "dns-direct", "server": "1.1.1.1" }
+    ],
+    "rules": [
+      { "domain": ["example.com"], "server": "dns-direct" },
+      { "query_type": ["A", "AAAA"], "server": "dns-fake" }
+    ],
+    "final": "dns-proxy",
+    "strategy": "prefer_ipv4",
+    "independent_cache": true
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+      "mtu": 9000,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "gvisor"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "example.com",
+      "server_port": 443,
+      "uuid": "11111111-2222-3333-4444-555555555555",
+      "tls": { "enabled": true, "server_name": "example.com", "alpn": ["http/1.1"] },
+      "transport": { "type": "ws", "path": "/ws" }
+    },
+    { "type": "direct", "tag": "direct" }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": { "server": "dns-direct", "strategy": "prefer_ipv4" },
+    "rules": [{ "action": "sniff" }],
+    "final": "proxy"
+  }
+}

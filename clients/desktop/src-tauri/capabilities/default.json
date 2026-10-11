@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: core defaults, plus native HTTP for subscription URLs. The HTTP scope is any http(s) URL because a subscription link is arbitrary user input (a remote panel, or a local converter on localhost), exactly as on Android, where CapacitorHttp has no scope at all. The URL is also checked in shared/src/core/subscription.ts before the request is made. Certificate validation cannot be disabled: the plugin's dangerous-settings feature is not compiled in.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://*:*" },
+        { "url": "http://*:*" }
+      ]
+    }
+  ]
+}

@@ -14,6 +14,11 @@ ramzapp*
 node_modules/
 dist/
 build/
+
+# sing-box writes cache.db into its working directory. `nexusd serve -state <dir>` keeps it out
+# of the tree, but running the daemon or its tests from core/ without one leaves a copy behind.
+# It holds resolved addresses and rule-set caches - not credentials, but not source either.
+cache.db
 .gradle/
 local.properties
 *.apk

@@ -1,0 +1,146 @@
+{
+  "note": "ADR-0003 Phase 1. clients/web must not be modified, so these are copies.",
+  "copiedAt": "2026-09-23",
+  "files": [
+    {
+      "target": "clients/shared/src/App.tsx",
+      "source": "clients/web/src/App.tsx",
+      "sourceSha256": "83d4a20eac7176ea3bc69be2f64901da806e79b8eb2687d5b15d472de3e6feb1"
+    },
+    {
+      "target": "clients/shared/src/components/AdBanner.tsx",
+      "source": "clients/web/src/components/AdBanner.tsx",
+      "sourceSha256": "8c730b1cfffeb18e10327d7f69cba1857f09dd742a536e22f5c67cae42de1009"
+    },
+    {
+      "target": "clients/shared/src/components/AddSubscriptionDialog.tsx",
+      "source": "clients/web/src/components/AddSubscriptionDialog.tsx",
+      "sourceSha256": "b6eed4d53d6787648c731537e53d92270f20bbc64a1a7cd0b3ab4ad5da0eb87e"
+    },
+    {
+      "target": "clients/shared/src/components/BottomNav.tsx",
+      "source": "clients/web/src/components/BottomNav.tsx",
+      "sourceSha256": "6f1ebcc83c171ec898fa5dad5a4fad41cf02c7939bae4615ab73d57cbebc46da"
+    },
+    {
+      "target": "clients/shared/src/components/NodeSheet.tsx",
+      "source": "clients/web/src/components/NodeSheet.tsx",
+      "sourceSha256": "4971cf4dd4a8141651dec830403a84b1a07a42c8774555709154f019fcce388f"
+    },
+    {
+      "target": "clients/shared/src/components/QrScanner.tsx",
+      "source": "clients/web/src/components/QrScanner.tsx",
+      "sourceSha256": "2f1910523a83d7b8f8591163b45dc8e8773830130c707f8cf0b57f019391b7c6"
+    },
+    {
+      "target": "clients/shared/src/components/Toast.tsx",
+      "source": "clients/web/src/components/Toast.tsx",
+      "sourceSha256": "cb23303c2d6dec75822792548be61b0b9ffce863051c0802bd8e3af40a902c63"
+    },
+    {
+      "target": "clients/shared/src/core/NexusProvider.tsx",
+      "source": "clients/web/src/core/NexusProvider.tsx",
+      "sourceSha256": "1a378124edda695083e360a23b4b6fb453a91374a8cf7974135cf259d99dcfe7"
+    },
+    {
+      "target": "clients/shared/src/core/ads.ts",
+      "source": "clients/web/src/core/ads.ts",
+      "sourceSha256": "6ca6a903709b187b8e012ea9d23ae3a3fc70552348aca6bf10dd82e54026eef0"
+    },
+    {
+      "target": "clients/shared/src/core/coreEvents.ts",
+      "source": "clients/web/src/core/coreEvents.ts",
+      "sourceSha256": "1388bcfcef78de1d16799bfc182dce54f65a5b0a4d9246b43c66882b050bcd1b"
+    },
+    {
+      "target": "clients/shared/src/core/format.ts",
+      "source": "clients/web/src/core/format.ts",
+      "sourceSha256": "680e4aab7f0cedafe23dcf1f84d13145cb511e72829d5516f694c78d99de20e2"
+    },
+    {
+      "target": "clients/shared/src/core/nodeDetails.ts",
+      "source": "clients/web/src/core/nodeDetails.ts",
+      "sourceSha256": "5174ad449a9ef51cce1386a13f2c0e531fe40760663cd6812e4b8593658be0a5"
+    },
+    {
+      "target": "clients/shared/src/core/plugin.ts",
+      "source": "clients/web/src/core/plugin.ts",
+      "sourceSha256": "1e3894cb7dba3fadc9a8fb25a2d74749d7f4934e029c68e47f048766341abc68"
+    },
+    {
+      "target": "clients/shared/src/core/plugin.web.ts",
+      "source": "clients/web/src/core/plugin.web.ts",
+      "sourceSha256": "542a64ab04b4558d2617fa58e8d3032745aeac9fc8a3c237382a8821b434537e"
+    },
+    {
+      "target": "clients/shared/src/core/selection.ts",
+      "source": "clients/web/src/core/selection.ts",
+      "sourceSha256": "40c66edf878b1cc6e82ae27e51b5c4de4c5ac046cc6a6a9491fc514d91059f49"
+    },
+    {
+      "target": "clients/shared/src/core/singboxConfig.ts",
+      "source": "clients/web/src/core/singboxConfig.ts",
+      "sourceSha256": "d00007dea8ea449074d96036749244f9e5cbc010b95a6db3d736c728cb179032"
+    },
+    {
+      "target": "clients/shared/src/core/subscription.ts",
+      "source": "clients/web/src/core/subscription.ts",
+      "sourceSha256": "c961eaba9ed42f984bb65758ae36c45316434013fc7eaba8e142f5d6c863f72b"
+    },
+    {
+      "target": "clients/shared/src/core/useLivePing.ts",
+      "source": "clients/web/src/core/useLivePing.ts",
+      "sourceSha256": "de3220a039f720707bba65d299afe7218b551ac58caaac55df4a38e7eae330b0"
+    },
+    {
+      "target": "clients/shared/src/core/useNetworkStatus.ts",
+      "source": "clients/web/src/core/useNetworkStatus.ts",
+      "sourceSha256": "6dc138d278bed839866f3dd2f5d6e3b7ed775c10397cfaf62bea8041756b2fbc"
+    },
+    {
+      "target": "clients/shared/src/core/useNexusCore.ts",
+      "source": "clients/web/src/core/useNexusCore.ts",
+      "sourceSha256": "d1439261f92d7097133843038c6961ec0fe2f824ce3073817db5be02cbcd9cd0"
+    },
+    {
+      "target": "clients/shared/src/core/useSubscriptions.ts",
+      "source": "clients/web/src/core/useSubscriptions.ts",
+      "sourceSha256": "b52dec5319b7755a65e1355a32d0123b157cd4030762753d6c5a48b59f5ce851"
+    },
+    {
+      "target": "clients/shared/src/data/servers.ts",
+      "source": "clients/web/src/data/servers.ts",
+      "sourceSha256": "5019ee0e9fdbe55bb045554c481b76cecc29653d8c42f84970872e64ffe8fb21"
+    },
+    {
+      "target": "clients/shared/src/index.css",
+      "source": "clients/web/src/index.css",
+      "sourceSha256": "83b6ea25979911199b0b084e94383ca4b4c5cdd4cfc32055db8971edaffb56fc"
+    },
+    {
+      "target": "clients/shared/src/views/HomeView.tsx",
+      "source": "clients/web/src/views/HomeView.tsx",
+      "sourceSha256": "8318017efc109606a4e3eeec5779960cf75ad833f4f6aca8aca48a408a2df51d"
+    },
+    {
+      "target": "clients/shared/src/views/LogsView.tsx",
+      "source": "clients/web/src/views/LogsView.tsx",
+      "sourceSha256": "a0b64de7f6fd58f3c51ba17b1a7eb9fa4abc535e68f49bdfbb8907ce59eddab1"
+    },
+    {
+      "target": "clients/shared/src/views/ServersView.tsx",
+      "source": "clients/web/src/views/ServersView.tsx",
+      "sourceSha256": "1994f6a5269417a451961107e30549c391a588dfe12c6c37e94482d79f45b3a0"
+    },
+    {
+      "target": "clients/shared/src/core/serverTests.ts",
+      "source": "clients/web/src/core/serverTests.ts",
+      "sourceSha256": "2213f1b8fa9d0114fa75b5310ee7fafcc26ef9b4a633435b3e2b0d494d80b9a4"
+    },
+    {
+      "target": "clients/shared/src/components/SubscriptionShareSheet.tsx",
+      "source": "clients/web/src/components/SubscriptionShareSheet.tsx",
+      "sourceSha256": "90dd3bf742a7872a780a23d9ba46d7d3d3f5b5c283ceff76d48ca2fdc56b9acd"
+    }
+  ]
+}
