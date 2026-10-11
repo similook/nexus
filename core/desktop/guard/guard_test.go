@@ -465,6 +465,10 @@ func TestLeavesUnresolvableHostnameForTheCore(t *testing.T) {
 	if !hasWarning(result, "could not resolve") {
 		t.Errorf("no warning about the failed lookup: %v", result.Warnings)
 	}
+	// Warnings go to the in-app log, which the Logs screen copies; they must not name the server.
+	if hasWarning(result, "nope.example.net") {
+		t.Errorf("a warning names the server: %v", result.Warnings)
+	}
 }
 
 func TestSkipsIPLiterals(t *testing.T) {
@@ -489,7 +493,9 @@ func TestDescribeRedactsCredentialsWithoutMutating(t *testing.T) {
 	config := `{"outbounds":[{
 		"type":"vless","tag":"proxy","server":"203.0.113.10","server_port":443,
 		"uuid":"11111111-2222-3333-4444-555555555555",
-		"tls":{"enabled":true,"server_name":"example.com","reality":{"public_key":"pub","private_key":"SECRET"}}
+		"tls":{"enabled":true,"server_name":"sni.example.com",
+			"reality":{"enabled":true,"public_key":"PUBLICKEY","short_id":"abcd","private_key":"SECRET"}},
+		"transport":{"type":"ws","path":"/ws-path","headers":{"Host":"cdn.example.com"}}
 	}]}`
 
 	described, err := DescribeProxyOutbound(config)
@@ -502,19 +508,63 @@ func TestDescribeRedactsCredentialsWithoutMutating(t *testing.T) {
 			t.Errorf("a credential survived redaction: %s", described)
 		}
 	}
-	// Public key and SNI stay: they travel in the clear on the wire anyway, and they are
-	// exactly the fields that are usually wrong when a node does not work.
-	for _, kept := range []string{"pub", "example.com"} {
-		if !strings.Contains(described, kept) {
-			t.Errorf("%q should have been kept: %s", kept, described)
+	// Nor anything that says WHICH server this is. The desktop log ring keeps every level, and
+	// the Logs screen copies it into bug reports.
+	for _, endpoint := range []string{"203.0.113.10", "sni.example.com", "PUBLICKEY", "abcd", "/ws-path", "cdn.example.com"} {
+		if strings.Contains(described, endpoint) {
+			t.Errorf("an endpoint detail (%s) survived redaction: %s", endpoint, described)
 		}
 	}
 
 	// THE ONE THAT WOULD BE CATASTROPHIC. Redacting in place would hand sing-box a config
 	// whose password is literally "***", and the tunnel would fail to authenticate with no
 	// obvious cause.
-	if !strings.Contains(config, "11111111-2222") {
+	if !strings.Contains(config, "11111111-2222") || !strings.Contains(config, "sni.example.com") {
 		t.Error("DescribeProxyOutbound mutated the config it was given")
+	}
+}
+
+// The line is still worth logging: everything that tells two failure modes apart survives - the
+// protocol, port, flow, transport type, fingerprint - and every withheld field still says
+// whether it was set, because an empty SNI or short ID is often the bug.
+func TestDescribeKeepsWhatDiagnosesANode(t *testing.T) {
+	config := `{"outbounds":[{
+		"type":"vless","tag":"proxy","server":"203.0.113.10","server_port":8443,"flow":"xtls-rprx-vision",
+		"domain_resolver":{"server":"dns-hosts","strategy":"prefer_ipv4"},
+		"tls":{"enabled":true,"server_name":"","utls":{"enabled":true,"fingerprint":"chrome"},
+			"reality":{"enabled":true,"public_key":"PUBLICKEY","short_id":""}},
+		"transport":{"type":"grpc","service_name":"svc"}
+	}]}`
+
+	described, err := DescribeProxyOutbound(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal([]byte(described), &got); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	tls := got["tls"].(map[string]any)
+	reality := tls["reality"].(map[string]any)
+	transport := got["transport"].(map[string]any)
+
+	for name, check := range map[string]bool{
+		"type kept":                         got["type"] == "vless",
+		"server_port kept":                  got["server_port"] == float64(8443),
+		"flow kept":                         got["flow"] == "xtls-rprx-vision",
+		"server marked as set":              got["server"] == withheldValue,
+		"an empty SNI stays visibly empty":  tls["server_name"] == "",
+		"utls fingerprint kept":             tls["utls"].(map[string]any)["fingerprint"] == "chrome",
+		"reality enabled kept":              reality["enabled"] == true,
+		"public key marked as set":          reality["public_key"] == withheldValue,
+		"an empty short ID stays empty":     reality["short_id"] == "",
+		"transport type kept":               transport["type"] == "grpc",
+		"service name marked as set":        transport["service_name"] == withheldValue,
+		"DNS server tag in domain_resolver": got["domain_resolver"].(map[string]any)["server"] == "dns-hosts",
+	} {
+		if !check {
+			t.Errorf("%s: %s", name, described)
+		}
 	}
 }
 

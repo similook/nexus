@@ -105,6 +105,17 @@ func TestRoutingModesOverTheWire(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	started := events.waitFor(t, 0, "Direct")
+
+	// The log the Logs screen shows describes the proxy outbound without naming its server.
+	described := ""
+	for _, line := range server.logs.read(0) {
+		if strings.Contains(line, "guard: proxy outbound: ") {
+			described = line
+		}
+	}
+	if !strings.Contains(described, `"server":"[redacted]"`) || strings.Contains(described, "127.0.0.1") {
+		t.Errorf("the proxy outbound log line does not withhold the server: %q", described)
+	}
 	if strings.Join(started.Modes, ",") != "VPN,Direct" {
 		t.Errorf("modes %v, expected exactly VPN and Direct", started.Modes)
 	}

@@ -471,7 +471,7 @@ func resolveOutboundServers(ctx context.Context, root map[string]any, options Op
 				// Leave the hostname in place. The core may still manage it, and failing the
 				// whole connect because one lookup missed would be worse than trying.
 				result.Warnings = append(result.Warnings,
-					fmt.Sprintf("could not resolve %s; leaving the hostname for the core", host))
+					"could not resolve an outbound's server name; leaving it for the core")
 				continue
 			}
 
@@ -628,15 +628,30 @@ func hasProxyOutbound(root map[string]any) bool {
 // ---------------------------------------------------------------------------------------
 
 // secretKeys are the fields that are the whole credential.
-//
-// Public keys and SNI deliberately stay: they travel in the clear on the wire anyway, and they
-// are exactly the fields that are usually wrong when a node does not work.
 var secretKeys = map[string]bool{
 	"uuid": true, "password": true, "private_key": true,
 	"psk": true, "auth": true, "auth_str": true, "token": true,
 }
 
-// DescribeProxyOutbound renders the proxy outbound with credentials replaced, for logging.
+// endpointKeys say WHICH server a node is - its address, the name and key it presents, its
+// transport host and path - without being credentials.
+//
+// They are withheld from the log too. On Android this line is debug-build only (NexusLog.d);
+// here the log ring keeps every level, and the Logs screen shows it and copies it into bug
+// reports. What a value was is rarely the question, whether it was set often is - an empty SNI
+// or a missing short ID - so a value that was set becomes withheldValue and an empty one stays
+// empty.
+var endpointKeys = map[string]bool{
+	"server": true, "server_name": true, "public_key": true, "short_id": true,
+	"host": true, "path": true, "service_name": true, "headers": true,
+}
+
+// withheldValue replaces an endpoint detail that was set. See endpointKeys. No angle brackets:
+// json.Marshal escapes them, and the Logs screen would show the escape codes.
+const withheldValue = "[redacted]"
+
+// DescribeProxyOutbound renders the proxy outbound for logging, with credentials replaced and
+// endpoint details withheld (secretKeys, endpointKeys).
 //
 // # WHY THIS IS WORTH THE LOG LINE
 //
@@ -682,6 +697,12 @@ func redact(node map[string]any) map[string]any {
 		switch {
 		case secretKeys[key]:
 			out[key] = "***"
+		case key == "domain_resolver":
+			// A DNS server tag (the guard's dns-hosts), not an address: kept, so the line still
+			// shows whether the outbound was pinned to the pre-resolved answers.
+			out[key] = value
+		case endpointKeys[key]:
+			out[key] = withheld(value)
 		default:
 			if nested, ok := value.(map[string]any); ok {
 				out[key] = redact(nested)
@@ -691,4 +712,25 @@ func redact(node map[string]any) map[string]any {
 		}
 	}
 	return out
+}
+
+// withheld keeps an empty value as it is and replaces anything else with withheldValue.
+func withheld(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		if typed == "" {
+			return ""
+		}
+	case []any:
+		if len(typed) == 0 {
+			return typed
+		}
+	case map[string]any:
+		if len(typed) == 0 {
+			return typed
+		}
+	}
+	return withheldValue
 }
