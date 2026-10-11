@@ -49,5 +49,8 @@ Thumbs.db
 
 # ─── Working files ───────────────────────────────────────────────────────────────────────
 *.log
+# A device log capture (adb logcat) was once committed at this path. Device logs carry device
+# and connection details, so this one stays out of the tree.
+core/crash.txt
 .env
 .env.local
