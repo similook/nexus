@@ -10,6 +10,7 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
+bash ./scripts/prepare-sing-box.sh
 
 command -v go >/dev/null || { echo "go toolchain required" >&2; exit 1; }
 

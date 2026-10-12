@@ -7,6 +7,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+bash ./scripts/prepare-sing-box.sh
 
 OUT="${OUT:-build/android/nexus.aar}"
 ANDROID_API="${ANDROID_API:-21}"

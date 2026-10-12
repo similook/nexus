@@ -262,11 +262,19 @@ function tlsFromParams(params: URLSearchParams, host: string): Record<string, un
   if (security === 'reality') {
     const pbk = params.get('pbk');
     if (!pbk) throw new SubscriptionError('reality link is missing its public key (pbk)');
-    tls.reality = {
+    const reality: Record<string, unknown> = {
       enabled: true,
       public_key: pbk,
       short_id: params.get('sid') ?? '',
     };
+    // Opt-in only. 3x-ui adds support-x25519mlkem768=true to its REALITY links, and Xray-core
+    // v26.9.8+ servers refuse a ClientHello without the X25519MLKEM768 key share, which the
+    // core strips unless told otherwise (core/patches/sing-box/README.md). Absent, or anything
+    // but "true": the generated config is exactly what it was before.
+    if (params.get('support-x25519mlkem768')?.trim().toLowerCase() === 'true') {
+      reality.support_x25519mlkem768 = true;
+    }
+    tls.reality = reality;
     // REALITY implies uTLS; default to chrome if the link did not say.
     if (!tls.utls) tls.utls = { enabled: true, fingerprint: 'chrome' };
   }

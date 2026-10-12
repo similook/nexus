@@ -11,6 +11,7 @@ apple:
 	./scripts/build-apple.sh
 
 test:
+	bash ./scripts/prepare-sing-box.sh
 	go test ./nexuscore/...
 
 clean:

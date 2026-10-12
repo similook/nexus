@@ -28,6 +28,8 @@ const CASES: Array<[name: string, uri: string]> = [
   ['vless-ws-tls', `vless://${UUID}@example.com:443?type=ws&path=%2Fws&host=cdn.example.com&security=tls&sni=cdn.example.com#a`],
   ['vless-reality-vision', `vless://${UUID}@example.com:443?security=reality&sni=www.microsoft.com&pbk=${PBK}&sid=ab&fp=chrome&flow=xtls-rprx-vision&type=tcp#a`],
   ['vless-reality-grpc', `vless://${UUID}@example.com:443?security=reality&sni=www.microsoft.com&pbk=${PBK}&sid=&fp=chrome&type=grpc&serviceName=gsvc#a`],
+  // 3x-ui's REALITY link shape: opts in to the X25519MLKEM768 key share (core/patches/sing-box).
+  ['vless-reality-vision-mlkem', `vless://${UUID}@example.com:443?security=reality&sni=www.microsoft.com&pbk=${PBK}&sid=ab&fp=chrome&flow=xtls-rprx-vision&type=tcp&support-x25519mlkem768=true#a`],
   ['vless-httpupgrade', `vless://${UUID}@example.com:80?type=httpupgrade&path=%2Fhu&host=h.example.com#a`],
   ['trojan-tls-ws', `trojan://password123@example.com:443?security=tls&sni=example.com&type=ws&path=%2Ftr#a`],
   ['shadowsocks', `ss://${Buffer.from('aes-256-gcm:password123').toString('base64')}@example.com:8388#a`],

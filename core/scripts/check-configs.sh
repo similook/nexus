@@ -16,6 +16,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+bash ./scripts/prepare-sing-box.sh
 TAGS=$(grep -oP '(?<=^TAGS=")[^"]+' scripts/build-android.sh)
 
 echo "==> regenerating fixtures"
