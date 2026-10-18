@@ -1,7 +1,7 @@
 # Nexus VPN — Privacy Policy
 
 **Effective date:** 18 October 2026
-**Publisher:** SNACK APP ("we", "us")
+**Publisher:** SNACK VPN APP LIMITED ("we", "us")
 **Contact:** open an issue at https://github.com/similook/nexus/issues
 
 Nexus VPN is a client app. It connects your phone to proxy and VPN servers **that you add
@@ -61,14 +61,14 @@ your real IP address. Your other apps' traffic goes through the VPN while it is 
 | Notifications | To show the connection status while the VPN is on, as Android requires. |
 | Start at boot | Only if you turn on auto-connect. Off by default. |
 | Internet and network state | To connect and to notice network changes. |
-| Advertising ID (`AD_ID`) | Declared because the app contains Google's advertising SDK. The ID is used only by Google AdMob, and only in versions that show ads, as described in section 5. |
+| Advertising ID (`AD_ID`) and Android's ad-services permissions | Only in versions that show ads: Google's advertising SDK declares them, and they are used only by Google AdMob, as described in section 5. Versions without ads, such as 1.3.3, do not contain the SDK and do not request them. |
 
 ## 5. Advertising
 
-Versions of Nexus VPN distributed through app stores that show ads (such as the Xiaomi GetApps
-version) display ads from **Google AdMob**, a service of Google LLC / Google Ireland Limited.
-Versions without ads contain Google's advertising SDK but never start it, so it makes no
-connections.
+Versions of Nexus VPN that show ads display ads from **Google AdMob**, a service of Google LLC /
+Google Ireland Limited. **Version 1.3.3 shows no ads**: it does not contain Google's advertising
+SDK and makes no connection to AdMob. If a later version adds ads, its release notes say so, and
+this section describes how they work.
 
 - **When an ad appears:** one full-screen ad, only after you tap **Disconnect** inside the app, at
   most once every 3 minutes. Never when the app opens, never when you connect, and never when you
@@ -125,4 +125,4 @@ Significant changes are also mentioned in the release notes.
 
 ## 10. Contact
 
-SNACK APP — https://github.com/similook/nexus/issues
+SNACK VPN APP LIMITED — https://github.com/similook/nexus/issues
