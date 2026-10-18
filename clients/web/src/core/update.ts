@@ -72,6 +72,15 @@ export type UpdateCheck = { update: AvailableUpdate } | { update: null; reason: 
 
 const PLAY_INSTALLER = 'com.android.vending';
 
+/**
+ * Stores that update the app themselves and forbid it from prompting for updates: Xiaomi
+ * GetApps (global) and Mi Market (China). GetApps review guideline 3.3.5 reads "The app must not
+ * prompt to be updated when run", and 3.4.1 rules out sending users to download apps elsewhere -
+ * which a GitHub release link is. An install from one of these is never checked: no request goes
+ * out and no banner can appear.
+ */
+const STORE_UPDATED_INSTALLERS = new Set(['com.xiaomi.mipicks', 'com.xiaomi.market']);
+
 /** The envelope is a few hundred bytes. Anything near this is not one. */
 const MAX_ENVELOPE_CHARS = 64 * 1024;
 
@@ -214,6 +223,7 @@ export function decide(manifest: UpdateManifest, install: InstallInfo): UpdateCh
   if (manifest.versionCode <= install.versionCode) return { update: null, reason: 'up to date' };
   if (manifest.minSdk > install.sdkInt) return { update: null, reason: 'needs a newer Android version' };
   if (!install.abis.includes(manifest.abi)) return { update: null, reason: 'not built for this device (ABI)' };
+  if (STORE_UPDATED_INSTALLERS.has(install.installer)) return { update: null, reason: 'updated by its store' };
 
   // A Play install is updated by Play. Pointing it at a GitHub APK would at best fail to install.
   const channel: UpdateChannel = install.installer === PLAY_INSTALLER ? 'play' : 'github';
@@ -258,6 +268,8 @@ export async function checkForUpdate(deps: UpdateDeps = nativeDeps): Promise<Upd
       return { update: null, reason: 'install info unavailable' };
     }
     if (!validInstall(install)) return { update: null, reason: 'install info unavailable' };
+    // Asked before anything is fetched: a store install never contacts GitHub at all.
+    if (STORE_UPDATED_INSTALLERS.has(install.installer)) return { update: null, reason: 'updated by its store' };
 
     let response: { status: number; data: unknown };
     try {

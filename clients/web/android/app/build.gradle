@@ -49,6 +49,16 @@ def signingReady = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].eve
     signingValue(key, env)?.trim()
 }
 
+/**
+ * True when `cap sync` linked the AdMob plugin, which it does only for an ads build
+ * (VITE_NEXUS_ADS=test or live - see capacitor.config.ts).
+ *
+ * Its manifest entries and app id come with it, never without it. The SDK refuses to start
+ * without APPLICATION_ID, so a plugin without them crashes at launch; and an APK without the SDK
+ * has no reason to name an ad app at all.
+ */
+def adsIncluded = rootProject.findProject(':capacitor-community-admob') != null
+
 android {
     namespace "io.nexus.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -56,8 +66,15 @@ android {
         applicationId "io.nexus.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 6
-        versionName "1.3.2"
+        versionCode 7
+        versionName "1.3.3"
+        // The AdMob app id behind src/ads/AndroidManifest.xml's APPLICATION_ID, in ads builds
+        // only. Google's sample id unless the build passes a live one
+        // (-PnexusAdmobAppId=ca-app-pub-...~...), which must belong to the same AdMob app as
+        // VITE_NEXUS_ADMOB_INTERSTITIAL. See src/core/admob.ts.
+        if (adsIncluded) {
+            resValue "string", "admob_app_id", (project.findProperty('nexusAdmobAppId') ?: 'ca-app-pub-3940256099942544~3347511713')
+        }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -141,13 +158,23 @@ android {
     }
 
     /*
-     * The AAR carries arm64-v8a only (core/scripts/build-android.sh targets android/arm64), so
-     * the APK must not claim to support anything else - a 32-bit device would install it and
+     * The APK carries exactly the ABIs the AAR was built for (core/scripts/build-android.sh:
+     * arm64-v8a by default, armeabi-v7a as well with ANDROID_TARGETS=android/arm,android/arm64),
+     * as one APK. It must not claim more - a device whose ABI is missing would install it and
      * then crash on the first JNI call with UnsatisfiedLinkError.
      */
     splits {
         abi {
             enable false
+        }
+    }
+
+    // The AdMob manifest entries, merged over the main manifest only when the plugin is linked
+    // (adsIncluded, above).
+    sourceSets {
+        if (adsIncluded) {
+            debug.manifest.srcFile 'src/ads/AndroidManifest.xml'
+            release.manifest.srcFile 'src/ads/AndroidManifest.xml'
         }
     }
 

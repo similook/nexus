@@ -236,6 +236,96 @@ Verify before installing:
 
 ---
 
+## Android 1.3.3 / Xiaomi GetApps
+
+1.3.3 is the first build for Xiaomi GetApps as well as GitHub. It carries 32-bit ARM as well as
+64-bit, and by default **no ad SDK at all**.
+
+### Build the AAR for both ABIs
+
+```bash
+cd core
+ANDROID_TARGETS=android/arm,android/arm64 ./scripts/build-android.sh
+mkdir -p ../clients/web/android/app/libs
+cp build/android/nexus.aar ../clients/web/android/app/libs/nexus.aar
+```
+
+Without `ANDROID_TARGETS` the AAR (and so the APK) is arm64 only. Both ABIs roughly double the
+native library in the APK.
+
+### Ads-off build (default, 1.3.3)
+
+```bash
+cd clients/web
+npm ci && npm run build && npx cap sync android
+cd android && ./gradlew clean assembleRelease
+```
+
+With `VITE_NEXUS_ADS` unset, `cap sync` leaves the AdMob plugin out (capacitor.config.ts,
+`androidPlugins`), Gradle adds no AdMob manifest entries (`adsIncluded`), and the APK has no
+Google ad code and no advertising permissions.
+
+### Ads build (from 1.3.4)
+
+`VITE_NEXUS_ADS` must be set for **both** `npm run build` and `npx cap sync android`: the first
+turns the ad code on, the second links the native plugin. Setting it for only one gives a build
+that shows no ads (or no plugin to show them with).
+
+```bash
+cd clients/web
+export VITE_NEXUS_ADS=live                                  # or test: Google's test ads, never in a store build
+export VITE_NEXUS_ADMOB_INTERSTITIAL=ca-app-pub-<16 digits>/<10 digits>   # live only
+npm run build && npx cap sync android
+cd android && ./gradlew clean assembleRelease -PnexusAdmobAppId=ca-app-pub-<16 digits>~<10 digits>
+```
+
+- `live` without a well-formed unit ID, or with Google's test unit, falls back to no ads
+  (`npm run check-ads`).
+- The app ID and the unit ID must belong to the same AdMob app.
+- The ads build downloads the Google Mobile Ads SDK from Google's Maven repository
+  (`dl.google.com`). Build it on a machine and network that repository serves. Where Google
+  refuses (it answers 404), do not route around the refusal; build elsewhere.
+- To go back to an ads-off build, unset `VITE_NEXUS_ADS` and run `npx cap sync android` again,
+  so the generated Gradle files drop the plugin.
+
+### Signing
+
+Gradle signs the release from `clients/web/android/keystore.properties` (keys `storeFile`,
+`storePassword`, `keyAlias`, `keyPassword`; see `keystore.properties.example`), or, when a key is
+missing there, from the environment: `NEXUS_STORE_FILE`, `NEXUS_STORE_PASSWORD`,
+`NEXUS_KEY_ALIAS`, `NEXUS_KEY_PASSWORD`. Without either, the APK comes out unsigned (section 2).
+Never commit, print or paste these values. GetApps updates must be signed with the same key as
+every earlier release, and the GetApps ownership check (the signed empty APK) uses that key too.
+
+### Verify before uploading anywhere
+
+```bash
+APK=app/build/outputs/apk/release/app-release.apk
+BT="$ANDROID_HOME/build-tools/34.0.0"
+
+"$BT/aapt" dump badging "$APK" | grep -E "^package|application-label:|native-code|launchable"
+"$BT/aapt" dump permissions "$APK"
+"$BT/apksigner" verify --verbose --print-certs "$APK"
+for p in 'Lcom/google/android/gms/ads/' 'Lcom/google/android/ump/' 'Lcom/getcapacitor/community/admob/'; do
+  printf '%s %s\n' "$(unzip -p "$APK" 'classes*.dex' | grep -ac "$p")" "$p"
+done
+```
+
+| Check | Ads-off (1.3.3) expects |
+|---|---|
+| badging | `package: name='io.nexus.app' versionCode='7' versionName='1.3.3'`, `application-label:'Nexus VPN'`, `native-code: 'arm64-v8a' 'armeabi-v7a'`, exactly one `launchable-activity` |
+| permissions | the same list as 1.3.2: no `AD_ID`, no `ACCESS_ADSERVICES_*` |
+| apksigner | verifies with v2 (v1 as well is fine); the certificate digest matches the previous release's |
+| dex scan | `0` for all three patterns |
+
+An ads build instead shows `AD_ID` and the three `ACCESS_ADSERVICES_*` permissions and non-zero
+dex counts; the other rows are the same.
+
+For GetApps, keep the version code above every version already uploaded there; the console
+refuses a lower or equal one.
+
+---
+
 ## Subsequent releases
 
 Bump both, in `clients/web/android/app/build.gradle`:

@@ -177,6 +177,11 @@ check(
   }),
 );
 check('sideload, Play-only release: nothing', outcome({ ...MANIFEST, channels: ['play'] }, INSTALL) === 'not yet available on github');
+// Xiaomi's stores update the app themselves, and GetApps forbids update prompts (3.3.5).
+const GETAPPS: InstallInfo = { ...INSTALL, installer: 'com.xiaomi.mipicks' };
+check('GetApps install: never offered, even with a newer GitHub release', outcome(MANIFEST, GETAPPS) === 'updated by its store');
+check('GetApps install: never offered on any channel', outcome({ ...MANIFEST, channels: ['github', 'play'] }, GETAPPS) === 'updated by its store');
+check('Mi Market install: never offered', outcome(MANIFEST, { ...INSTALL, installer: 'com.xiaomi.market' }) === 'updated by its store');
 
 // --- the whole check, with the transport faked --------------------------------------------
 
@@ -209,6 +214,10 @@ check(
   (await run({ installInfo: async () => ({ ...INSTALL, versionCode: 'x' }) as unknown as InstallInfo })).result === 'install info unavailable',
 );
 check('the default key rejects a test-signed manifest', (await run({ publicKey: undefined })).result === 'invalid signature');
+{
+  const r = await run({ installInfo: async () => ({ ...INSTALL, installer: 'com.xiaomi.mipicks' }) });
+  check('GetApps install: no update and nothing fetched', r.result === 'updated by its store' && r.fetched === 0, r);
+}
 
 // --- the compiled-in key -------------------------------------------------------------------
 

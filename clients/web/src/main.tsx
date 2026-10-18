@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { initAds } from './core/admob';
 import './index.css';
 
 const container = document.getElementById('root');
@@ -18,3 +19,7 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 );
+
+// Ads builds only (VITE_NEXUS_ADS); a no-op otherwise. Started here, outside React, so no
+// component owns it and StrictMode's double mount cannot start it twice.
+initAds();

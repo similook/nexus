@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged over src/main/AndroidManifest.xml only in an ads build, when cap sync linked the AdMob
+     plugin (app/build.gradle adsIncluded; capacitor.config.ts). A build without the plugin
+     carries none of this. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!-- The Mobile Ads SDK refuses to start without its app id, so every build that carries
+             the SDK declares one. The value comes from Gradle (admob_app_id in build.gradle):
+             Google's sample app id unless a live one is passed. Whether ads run at all is the web
+             build's VITE_NEXUS_ADS (src/core/admob.ts). -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="@string/admob_app_id" />
+        <!-- The SDK's start-up provider runs in every launch of the UI process, including the
+             ones BootReceiver causes with no screen. This holds its app-measurement start until
+             src/core/admob.ts initialises the SDK itself, after consent. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT"
+            android:value="true" />
+
+    </application>
+
+</manifest>

@@ -4,6 +4,8 @@ import { formatSpeedMB, formatTotal, formatUptime } from '../core/format';
 import { isQuicProtocol, type ServerNode } from '../data/servers';
 import type { RunningServer } from '../core/plugin';
 import { AdBanner } from '../components/AdBanner';
+import { AdPrivacyLink } from '../components/AdPrivacyLink';
+import { adAfterDisconnect, prepareAd } from '../core/admob';
 import { UpdateBanner } from '../components/UpdateBanner';
 import { useLivePing } from '../core/useLivePing';
 import { useNetworkStatus } from '../core/useNetworkStatus';
@@ -236,7 +238,15 @@ export function HomeView({ node }: { node: ServerNode | null }) {
 
           {/* #connect-btn */}
           <button
-            onClick={() => node !== null && void toggle(node.config, node.name)}
+            onClick={() => {
+              if (node === null) return;
+              // Read before the toggle. In an ads build (core/admob.ts) a disconnect made here is
+              // followed by the waiting full-screen ad, if one is due; a connect fetches the next
+              // one in the background. Both are no-ops in every other build. A stop from the
+              // notification or the tile never comes through here, so it never shows an ad.
+              const disconnecting = isConnected;
+              void toggle(node.config, node.name).then(disconnecting ? adAfterDisconnect : prepareAd);
+            }}
             // NOT disabled while connecting.
             //
             // It used to be `disabled={isBusy || node === null}`, and that was half of why a
@@ -319,6 +329,9 @@ export function HomeView({ node }: { node: ServerNode | null }) {
           total={trafficAvailable ? formatTotal(uplinkTotal) : 'unavailable'}
         />
       </div>
+
+      {/* Renders nothing unless this is an ads build and the user is where consent applies. */}
+      <AdPrivacyLink />
     </section>
   );
 }
