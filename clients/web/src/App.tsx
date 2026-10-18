@@ -123,9 +123,16 @@ function Shell() {
       return;
     }
 
-    const stillThere = selected !== null && pool.some((n) => n.id === selected.id);
-    if (userChoseRef.current && stillThere) return;
-    if (stillThere) return;
+    const current = selected === null ? undefined : pool.find((n) => n.id === selected.id);
+    if (current !== undefined) {
+      // Same node, rebuilt from the same link (the REALITY ML-KEM switch): take the new copy.
+      // Home's Connect starts `selected.config`, so keeping the old object would connect with
+      // the config from before the change. Only the selection follows - nothing reconnects.
+      if (selected !== null && current.uri === selected.uri && current.config !== selected.config) {
+        setSelected(current);
+      }
+      return;
+    }
 
     if (pool.length === 1) {
       setSelected(pool[0]);

@@ -28,6 +28,14 @@ const CASES: Array<[name: string, uri: string]> = [
   ['vless-ws-tls', `vless://${UUID}@example.com:443?type=ws&path=%2Fws&host=cdn.example.com&security=tls&sni=cdn.example.com#a`],
   ['vless-reality-vision', `vless://${UUID}@example.com:443?security=reality&sni=www.microsoft.com&pbk=${PBK}&sid=ab&fp=chrome&flow=xtls-rprx-vision&type=tcp#a`],
   ['vless-reality-grpc', `vless://${UUID}@example.com:443?security=reality&sni=www.microsoft.com&pbk=${PBK}&sid=&fp=chrome&type=grpc&serviceName=gsvc#a`],
+  // 3x-ui's REALITY link shape: opts in to the X25519MLKEM768 key share (core/patches/sing-box).
+  ['vless-reality-vision-mlkem', `vless://${UUID}@example.com:443?security=reality&sni=www.microsoft.com&pbk=${PBK}&sid=ab&fp=chrome&flow=xtls-rprx-vision&type=tcp&support-x25519mlkem768=true#a`],
+  // VLESS Encryption (core/patches/sing-box/v1.14.0/0002): 3x-ui's link shape over REALITY, and
+  // Vision on top of the encryption alone (Xray allows it without TLS).
+  ['vless-reality-encryption', `vless://${UUID}@example.com:443?security=reality&sni=www.microsoft.com&pbk=${PBK}&sid=ab&fp=chrome&type=tcp&encryption=mlkem768x25519plus.native.0rtt.${PBK}#a`],
+  ['vless-encryption-vision', `vless://${UUID}@example.com:443?type=tcp&flow=xtls-rprx-vision&encryption=mlkem768x25519plus.random.1rtt.100-111-1111.75-0-111.50-0-3333.${PBK}#a`],
+  // V2Ray QUIC, which used to come out as plain TCP.
+  ['vless-quic-tls', `vless://${UUID}@example.com:443?type=quic&security=tls&sni=example.com#a`],
   ['vless-httpupgrade', `vless://${UUID}@example.com:80?type=httpupgrade&path=%2Fhu&host=h.example.com#a`],
   ['trojan-tls-ws', `trojan://password123@example.com:443?security=tls&sni=example.com&type=ws&path=%2Ftr#a`],
   ['shadowsocks', `ss://${Buffer.from('aes-256-gcm:password123').toString('base64')}@example.com:8388#a`],
@@ -55,8 +63,9 @@ mkdirSync(outDir, { recursive: true });
 function assertSane(name: string, outbound: Record<string, unknown>) {
   // xtls-rprx-vision operates on TLS records. Without TLS there are none, the server rejects
   // the handshake, and every connection dies as a bare `EOF` with no config-level warning.
-  // CheckConfig returns nil for this - verified.
-  if (outbound.flow && !outbound.tls) {
+  // CheckConfig returns nil for this - verified. VLESS Encryption is the exception: Xray runs
+  // Vision on its records instead (nexuscore TestVLESSEncryptionAgainstXray, flow vision).
+  if (outbound.flow && !outbound.tls && !outbound.encryption) {
     throw new Error(`${name}: flow="${outbound.flow}" with no tls block`);
   }
 

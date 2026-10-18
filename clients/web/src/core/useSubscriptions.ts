@@ -1,9 +1,19 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import {
+  applyRealityMlkem,
+  carryRealityMlkem,
+  loadRealityMlkem,
+  realityMlkemKey,
+  realityMlkemState,
+  rebuildWithRealityMlkem,
+  saveRealityMlkem,
+  withRealityMlkem,
+  type RealityMlkemState,
+} from './realityMlkem';
 import {
   importSubscription,
   isInsecureUrl,
   parseSingleConfig,
-  rebuildNodeConfig,
   SubscriptionError,
   type SubscriptionUserinfo,
 } from './subscription';
@@ -48,7 +58,10 @@ function loadManual(): ServerNode[] {
   try {
     const raw = localStorage.getItem(MANUAL_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as ServerNode[]).map(rebuildNodeConfig) : [];
+    const mlkem = loadRealityMlkem();
+    return Array.isArray(parsed)
+      ? (parsed as ServerNode[]).map((n) => rebuildWithRealityMlkem(n, mlkem))
+      : [];
   } catch {
     return [];
   }
@@ -60,6 +73,7 @@ function load(): SubscriptionRecord[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
+    const mlkem = loadRealityMlkem();
     // Shape-check rather than trust: this survives an app upgrade that changed the schema, and
     // a half-written record should cost the user one subscription, not a blank screen.
     return parsed
@@ -70,7 +84,7 @@ function load(): SubscriptionRecord[] {
       // Regenerate every config from its URI on load. Without this, a fix to buildConfig()
       // only reaches nodes imported after the fix - which is how a device ends up running a
       // config that no longer exists anywhere in the source tree.
-      .map((r) => ({ ...r, nodes: r.nodes.map(rebuildNodeConfig) }));
+      .map((r) => ({ ...r, nodes: r.nodes.map((n) => rebuildWithRealityMlkem(n, mlkem)) }));
   } catch {
     return [];
   }
@@ -138,8 +152,19 @@ export interface UseSubscriptions {
    * as a manual node: the next refresh of that subscription regenerates its list from the
    * server and would silently discard the edit, so promoting it out of the subscription is the
    * only way to make the change survive.
+   *
+   * Returns the node as stored: `updated` with the REALITY ML-KEM switch carried over from the
+   * node it replaces. Anything that goes on to use the node (selection) must use this one.
    */
-  replaceNode: (id: string, updated: ServerNode) => void;
+  replaceNode: (id: string, updated: ServerNode) => ServerNode;
+  /** Where a node stands on the per-node REALITY ML-KEM switch (realityMlkem.ts). */
+  realityMlkem: (node: ServerNode) => RealityMlkemState;
+  /**
+   * Turn the REALITY ML-KEM switch on or off for this node, and rebuild every node with the
+   * same link so Connect and the Delay probe both get the new config. False when the node has
+   * no switch: not REALITY, or its link already opts in.
+   */
+  setRealityMlkem: (node: ServerNode, on: boolean) => boolean;
 }
 
 export function useSubscriptions(): UseSubscriptions {
@@ -158,6 +183,16 @@ export function useSubscriptions(): UseSubscriptions {
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>(load);
   const [manualNodes, setManualNodes] = useState<ServerNode[]>(loadManual);
   const [busy, setBusy] = useState(false);
+
+  // The REALITY ML-KEM switch: state to re-render on a change, a ref for callbacks that must
+  // not close over an old set (an import is async; see importInto).
+  const [mlkemKeys, setMlkemKeys] = useState<ReadonlySet<string>>(loadRealityMlkem);
+  const mlkemRef = useRef(mlkemKeys);
+  const commitMlkem = useCallback((next: ReadonlySet<string>) => {
+    mlkemRef.current = next;
+    saveRealityMlkem(next);
+    setMlkemKeys(next);
+  }, []);
 
   /*
    * Belt and braces for whoever makes this asynchronous again.
@@ -184,7 +219,8 @@ export function useSubscriptions(): UseSubscriptions {
           url,
           name: result.name,
           updatedAt: Date.now(),
-          nodes: result.nodes,
+          // A refresh rebuilds every node from the panel's links; put the switch back on.
+          nodes: result.nodes.map((n) => applyRealityMlkem(n, mlkemRef.current)),
           insecure: isInsecureUrl(url),
           userinfo: result.userinfo,
         };
@@ -233,7 +269,7 @@ export function useSubscriptions(): UseSubscriptions {
   );
 
   const addManual = useCallback((uri: string): ServerNode => {
-    const node = parseSingleConfig(uri);
+    const node = applyRealityMlkem(parseSingleConfig(uri), mlkemRef.current);
     setManualNodes((prev) => {
       // Replace rather than duplicate: the id is a hash of the URI, so pasting the same link
       // twice updates one entry instead of growing the list.
@@ -254,7 +290,7 @@ export function useSubscriptions(): UseSubscriptions {
 
     for (const uri of uris) {
       try {
-        parsed.push(parseSingleConfig(uri));
+        parsed.push(applyRealityMlkem(parseSingleConfig(uri), mlkemRef.current));
       } catch (e) {
         failures.push({ uri, reason: e instanceof Error ? e.message : 'could not be parsed' });
       }
@@ -280,7 +316,14 @@ export function useSubscriptions(): UseSubscriptions {
     return { imported: parsed.length, failed: failures.length, failures };
   }, []);
 
-  const replaceNode = useCallback((id: string, updated: ServerNode) => {
+  const replaceNode = useCallback((id: string, updated: ServerNode): ServerNode => {
+    const original = [...subscriptions.flatMap((r) => r.nodes), ...manualNodes].find((n) => n.id === id);
+    if (original !== undefined) {
+      const carried = carryRealityMlkem(mlkemRef.current, original, updated);
+      if (carried !== mlkemRef.current) commitMlkem(carried);
+    }
+    const stored = applyRealityMlkem(updated, mlkemRef.current);
+
     setSubscriptions((prev) => {
       if (!prev.some((record) => record.nodes.some((n) => n.id === id))) return prev;
       const next = prev.map((record) => ({
@@ -292,7 +335,7 @@ export function useSubscriptions(): UseSubscriptions {
     });
 
     setManualNodes((prev) => {
-      const next = [...prev.filter((n) => n.id !== id && n.id !== updated.id), updated];
+      const next = [...prev.filter((n) => n.id !== id && n.id !== stored.id), stored];
       try {
         localStorage.setItem(MANUAL_KEY, JSON.stringify(next));
       } catch {
@@ -300,7 +343,43 @@ export function useSubscriptions(): UseSubscriptions {
       }
       return next;
     });
-  }, []);
+    return stored;
+  }, [subscriptions, manualNodes, commitMlkem]);
+
+  const realityMlkem = useCallback(
+    (node: ServerNode) => realityMlkemState(node, mlkemKeys),
+    [mlkemKeys],
+  );
+
+  const setRealityMlkem = useCallback(
+    (node: ServerNode, on: boolean): boolean => {
+      const next = withRealityMlkem(mlkemRef.current, node, on);
+      const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+      if (next === null || key === null) return false;
+      commitMlkem(next);
+
+      // Every node of this server, not only the one tapped: the same server and user can sit
+      // in two subscriptions, and all of them must run the config the switch now describes.
+      const rebuild = (n: ServerNode) =>
+        n.uri !== undefined && realityMlkemKey(n.uri) === key ? rebuildWithRealityMlkem(n, next) : n;
+      setSubscriptions((prev) => {
+        const updated = prev.map((r) => ({ ...r, nodes: r.nodes.map(rebuild) }));
+        save(updated);
+        return updated;
+      });
+      setManualNodes((prev) => {
+        const updated = prev.map(rebuild);
+        try {
+          localStorage.setItem(MANUAL_KEY, JSON.stringify(updated));
+        } catch {
+          // Non-fatal; see save().
+        }
+        return updated;
+      });
+      return true;
+    },
+    [commitMlkem],
+  );
 
   const removeManual = useCallback((id: string) => {
     setManualNodes((prev) => {
@@ -326,6 +405,8 @@ export function useSubscriptions(): UseSubscriptions {
     addManual,
     addManualBatch,
     replaceNode,
+    realityMlkem,
+    setRealityMlkem,
     refresh,
     remove,
     removeManual,

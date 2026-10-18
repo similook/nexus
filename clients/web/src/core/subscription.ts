@@ -262,11 +262,19 @@ function tlsFromParams(params: URLSearchParams, host: string): Record<string, un
   if (security === 'reality') {
     const pbk = params.get('pbk');
     if (!pbk) throw new SubscriptionError('reality link is missing its public key (pbk)');
-    tls.reality = {
+    const reality: Record<string, unknown> = {
       enabled: true,
       public_key: pbk,
       short_id: params.get('sid') ?? '',
     };
+    // Opt-in only. 3x-ui adds support-x25519mlkem768=true to its REALITY links, and Xray-core
+    // v26.9.8+ servers refuse a ClientHello without the X25519MLKEM768 key share, which the
+    // core strips unless told otherwise (core/patches/sing-box/README.md). Absent, or anything
+    // but "true": the generated config is exactly what it was before.
+    if (params.get('support-x25519mlkem768')?.trim().toLowerCase() === 'true') {
+      reality.support_x25519mlkem768 = true;
+    }
+    tls.reality = reality;
     // REALITY implies uTLS; default to chrome if the link did not say.
     if (!tls.utls) tls.utls = { enabled: true, fingerprint: 'chrome' };
   }
@@ -336,7 +344,33 @@ function transportFromParams(params: URLSearchParams): Record<string, unknown> |
         ...(params.get('host') ? { host: [params.get('host')] } : {}),
         path: params.get('path') || '/',
       };
-    default: {
+    case 'quic': {
+      // V2Ray's QUIC transport, which sing-box speaks (with_quic) only in its plain form: QUIC
+      // packet encryption (quicSecurity/key) and header masquerades have no sing-box equivalent.
+      const quicSecurity = (params.get('quicSecurity') ?? 'none').toLowerCase();
+      const header = (params.get('headerType') ?? 'none').toLowerCase();
+      if (quicSecurity !== 'none' || (header !== 'none' && header !== '')) {
+        throw new SubscriptionError(
+          `transport "quic" with quicSecurity="${quicSecurity}", headerType="${header}" is not supported by sing-box`,
+        );
+      }
+      return { type: 'quic' };
+    }
+    // TRANSPORTS THE CORE CANNOT SPEAK FAIL THE IMPORT.
+    //
+    // They used to fall through to the tcp branch below and come out as plain TCP: a node that
+    // imported cleanly, looked like every other node, and could never carry a byte - the server
+    // was waiting for XHTTP or mKCP framing. Refusing them says why, which a silent TCP
+    // config never did.
+    case 'xhttp':
+    case 'splithttp':
+      throw new SubscriptionError(`transport "${type}" (XHTTP) is not supported yet: the Nexus core has no XHTTP`);
+    case 'kcp':
+    case 'mkcp':
+      throw new SubscriptionError(`transport "${type}" (mKCP) is not supported by sing-box`);
+    case 'tcp':
+    case 'raw': // Xray's current name for tcp
+    case '': {
       // tcp.
       //
       // Plain TCP needs no transport block - EXCEPT when the link asks for v2ray's HTTP
@@ -387,12 +421,15 @@ function transportFromParams(params: URLSearchParams): Record<string, unknown> |
       }
       return null;
     }
+    default:
+      throw new SubscriptionError(`transport "${type}" is not supported`);
   }
 }
 
 function describeTransport(params: URLSearchParams): string {
   const security = (params.get('security') ?? '').toLowerCase();
-  const type = (params.get('type') ?? 'tcp').toLowerCase();
+  const rawType = (params.get('type') ?? 'tcp').toLowerCase();
+  const type = rawType === 'raw' || rawType === '' ? 'tcp' : rawType;
   if (security === 'reality') return 'Reality';
   if (security === 'tls') return type === 'tcp' ? 'TLS' : `TLS / ${type}`;
   // Name the masquerade rather than calling it plain TCP - it is the difference between a
@@ -400,6 +437,25 @@ function describeTransport(params: URLSearchParams): string {
   const header = (params.get('headerType') ?? 'none').toLowerCase();
   if (type === 'tcp' && header === 'http') return 'TCP / HTTP';
   return type.toUpperCase();
+}
+
+/**
+ * Is this a VLESS Encryption value the core can speak?
+ *
+ *   mlkem768x25519plus.<native|xorpub|random>.<0rtt|1rtt>[.<padding>...].<key>[.<key>...]
+ *
+ * Keys are unpadded base64url X25519 public keys (32 bytes, 43 characters) or ML-KEM-768
+ * encapsulation keys (1184 bytes, 1579 characters); shorter fields are padding settings. The
+ * same split Xray-core makes (infra/conf/vless.go); the core re-checks it in full
+ * (core/patches/sing-box/v1.14.0/0002, vlessenc.NewClient).
+ */
+function isVlessEncryption(value: string): boolean {
+  const fields = value.split('.');
+  if (fields.length < 4 || fields[0] !== 'mlkem768x25519plus') return false;
+  if (!['native', 'xorpub', 'random'].includes(fields[1])) return false;
+  if (!['0rtt', '1rtt'].includes(fields[2])) return false;
+  const keys = fields.slice(3).filter((f) => f.length >= 20);
+  return keys.length > 0 && keys.every((k) => /^[A-Za-z0-9_-]+$/.test(k) && (k.length === 43 || k.length === 1579));
 }
 
 function parseVless(uri: string): ParsedNode {
@@ -414,6 +470,19 @@ function parseVless(uri: string): ParsedNode {
     server_port: Number(u.port) || 443,
     uuid: decodeURIComponent(u.username),
   };
+
+  // VLESS Encryption (Xray 25.8+, 3x-ui's "VLESS Encryption"), carried in `encryption`. "none" or
+  // absent is plain VLESS, unchanged. Without this field the core spoke plain VLESS to a server
+  // that expects the encrypted handshake: REALITY completed, then the server dropped every
+  // request, and nothing said why. An encryption the core does not implement fails the import
+  // instead, with the reason.
+  const encryption = params.get('encryption')?.trim() ?? '';
+  if (encryption !== '' && encryption !== 'none') {
+    if (!isVlessEncryption(encryption)) {
+      throw new SubscriptionError('unsupported VLESS encryption (only mlkem768x25519plus is implemented)');
+    }
+    outbound.encryption = encryption;
+  }
 
   const tls = tlsFromParams(params, host);
   if (tls) outbound.tls = tls;
@@ -433,8 +502,10 @@ function parseVless(uri: string): ParsedNode {
   // sing-box does not catch this. libbox.CheckConfig accepts flow-without-TLS and returns nil,
   // so it is a wire-level failure with no config-level warning - which is exactly why the
   // fixture emitter asserts it separately (scripts/emit-config-fixtures.mts).
+  // VLESS Encryption stands in for that TLS: Xray runs Vision on top of it, and so does the
+  // core (vlessenc registers its connection with Vision).
   const flow = params.get('flow');
-  if (flow && tls) outbound.flow = flow;
+  if (flow && (tls || outbound.encryption)) outbound.flow = flow;
 
   const transport = transportFromParams(params);
   if (transport) outbound.transport = transport;
@@ -517,6 +588,20 @@ function parseVmess(uri: string): ParsedNode {
     };
   } else if (net === 'grpc') {
     outbound.transport = { type: 'grpc', service_name: String(json.path || '') };
+  } else {
+    // Everything else goes through the same rules as a VLESS link, in that link's field names
+    // (vmess puts QUIC's security in `host` and the header masquerade in `type`). Before, these
+    // all came out as plain TCP - including the HTTP-header masquerade - and silently failed.
+    const transport = transportFromParams(
+      new URLSearchParams({
+        type: net,
+        path: String(json.path ?? ''),
+        host: net === 'quic' ? '' : String(json.host ?? ''),
+        headerType: String(json.type ?? 'none'),
+        ...(net === 'quic' ? { quicSecurity: String(json.host || 'none') } : {}),
+      }),
+    );
+    if (transport) outbound.transport = transport;
   }
 
   return {
@@ -980,13 +1065,94 @@ export function parseSingleConfig(uri: string): ServerNode {
 }
 
 /**
+ * Turn on the X25519MLKEM768 key share for a REALITY outbound: the per-node switch
+ * (realityMlkem.ts), for links whose panel does not write support-x25519mlkem768=true.
+ *
+ * Touches nothing but `tls.reality`, and only when REALITY is enabled - a plain TLS or non-TLS
+ * outbound comes back exactly as it went in, so the switch cannot reach any other protocol.
+ */
+function enableRealityMlkem(outbound: Record<string, unknown>): void {
+  const tls = outbound.tls as { reality?: Record<string, unknown> } | undefined;
+  if (tls?.reality?.enabled === true) tls.reality.support_x25519mlkem768 = true;
+}
+
+/** sing-box takes a REALITY public key as unpadded base64url of 32 bytes; nothing else can work. */
+const REALITY_PUBLIC_KEY = /^[A-Za-z0-9_-]{43}$/;
+
+/** JSON with object keys sorted at every level, so equal configs give equal strings. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * A REALITY link as the per-node ML-KEM switch sees it; null when the link is not REALITY, does
+ * not parse, or lacks what identifies a node - and then the node has no switch at all.
+ *
+ *   optIn     the link itself says support-x25519mlkem768=true
+ *   identity  the node's complete outbound as the generated config carries it, minus exactly:
+ *               tls.server_name, tls.reality.short_id   3x-ui draws both at random from the
+ *                                                       inbound's lists on every subscription
+ *                                                       fetch (sub/subService.go)
+ *               tls.reality.support_x25519mlkem768      the switch's own flag; keying on it
+ *                                                       would move the key when it is turned on
+ *             Everything else - protocol, address, port, credential, public key, fingerprint,
+ *             flow, transport, ALPN, insecure - stays in, unnormalized. The #remark and spiderX
+ *             never reach the config. The rest of the generated config is the shared template
+ *             plus values derived from this outbound's address, so it tells no two nodes apart
+ *             and would only reset every switch whenever the template changes.
+ *
+ * Required, or no identity: a protocol, an address, a port 1-65535, the credential that
+ * protocol authenticates with (VLESS uuid, Trojan password) and a well-formed public key.
+ */
+export function realityOfUri(uri: string): { optIn: boolean; identity: string } | null {
+  try {
+    const generated = JSON.parse(buildConfig(parseUri(uri.trim()).outbound)) as {
+      outbounds?: Array<Record<string, unknown>>;
+    };
+    const outbound = generated.outbounds?.find((o) => o.tag === 'proxy');
+    const tls = outbound?.tls as Record<string, unknown> | undefined;
+    const reality = tls?.reality as Record<string, unknown> | undefined;
+    if (outbound === undefined || tls === undefined || reality?.enabled !== true) return null;
+
+    const port = outbound.server_port;
+    const credential =
+      outbound.type === 'vless' ? outbound.uuid : outbound.type === 'trojan' ? outbound.password : undefined;
+    const complete =
+      typeof outbound.server === 'string' && outbound.server.length > 0 &&
+      typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535 &&
+      typeof credential === 'string' && credential.length > 0 &&
+      typeof reality.public_key === 'string' && REALITY_PUBLIC_KEY.test(reality.public_key);
+    if (!complete) return null;
+
+    const { server_name: _sni, ...tlsRest } = tls;
+    const { short_id: _sid, support_x25519mlkem768: optIn, ...realityRest } = reality;
+    return {
+      optIn: optIn === true,
+      identity: canonicalJson({ ...outbound, tls: { ...tlsRest, reality: realityRest } }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Rebuild a node's config from the URI it was imported from.
  *
  * Used on load so that a change to buildConfig() reaches data already in storage. Returns the
  * node unchanged when it has no URI (the built-in demo nodes) or when the URI no longer parses,
  * because a node that still works with a stale config beats a node that vanishes.
+ *
+ * `realityMlkem` is the per-node switch (realityMlkem.ts). False - the default - rebuilds
+ * exactly the config the link alone produces.
  */
-export function rebuildNodeConfig(node: ServerNode): ServerNode {
+export function rebuildNodeConfig(node: ServerNode, realityMlkem = false): ServerNode {
   // Only stored nodes reach this function (useSubscriptions rehydrates through it); the
   // built-in demo nodes are generated fresh each run and never persisted. So a stored node
   // with no URI was imported by a build that did not keep one, and its config can never be
@@ -997,6 +1163,7 @@ export function rebuildNodeConfig(node: ServerNode): ServerNode {
 
   try {
     const parsed = parseUri(node.uri);
+    if (realityMlkem) enableRealityMlkem(parsed.outbound);
     const { staleReason: _dropped, ...rest } = node;
     return { ...rest, config: buildConfig(parsed.outbound) };
   } catch (e) {
