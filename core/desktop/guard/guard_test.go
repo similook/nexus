@@ -568,6 +568,44 @@ func TestDescribeKeepsWhatDiagnosesANode(t *testing.T) {
 	}
 }
 
+// VLESS Encryption (1.3.3) carries the server's key material in one string. It must leave the
+// log as withheldValue, like a REALITY public key, while the ML-KEM switch - an on/off that
+// names no server - stays readable.
+func TestDescribeWithholdsVlessEncryption(t *testing.T) {
+	config := `{"outbounds":[{
+		"type":"vless","tag":"proxy","server":"203.0.113.10","server_port":443,
+		"uuid":"11111111-2222-3333-4444-555555555555",
+		"encryption":"mlkem768x25519plus.native.0rtt.SERVERKEYMATERIAL0123456789abcdefABCDEF",
+		"tls":{"enabled":true,"server_name":"sni.example.com",
+			"reality":{"enabled":true,"public_key":"PUBLICKEY","short_id":"abcd","support_x25519mlkem768":true}}
+	}]}`
+
+	described, err := DescribeProxyOutbound(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"SERVERKEYMATERIAL", "mlkem768x25519plus", "native.0rtt"} {
+		if strings.Contains(described, leak) {
+			t.Errorf("the VLESS Encryption value survived redaction (%s): %s", leak, described)
+		}
+	}
+
+	var got map[string]any
+	if err = json.Unmarshal([]byte(described), &got); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if got["encryption"] != withheldValue {
+		t.Errorf("encryption not marked as set: %s", described)
+	}
+	reality := got["tls"].(map[string]any)["reality"].(map[string]any)
+	if reality["support_x25519mlkem768"] != true {
+		t.Errorf("the ML-KEM switch should stay readable: %s", described)
+	}
+	if !strings.Contains(config, "SERVERKEYMATERIAL") {
+		t.Error("DescribeProxyOutbound mutated the config it was given")
+	}
+}
+
 // ---------------------------------------------------------------------------------------
 // Misc
 // ---------------------------------------------------------------------------------------

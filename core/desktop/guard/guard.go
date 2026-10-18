@@ -641,9 +641,15 @@ var secretKeys = map[string]bool{
 // reports. What a value was is rarely the question, whether it was set often is - an empty SNI
 // or a missing short ID - so a value that was set becomes withheldValue and an empty one stays
 // empty.
+//
+// "encryption" is VLESS Encryption (mlkem768x25519plus.<mode>.<rtt>.<server keys>): it carries
+// the server's public key material, so it names the server as surely as a REALITY public_key.
+// The ML-KEM switch (tls.reality.support_x25519mlkem768) is a plain on/off and names nothing;
+// it stays, because whether it was on is exactly what a "Handshake failed" report needs.
 var endpointKeys = map[string]bool{
 	"server": true, "server_name": true, "public_key": true, "short_id": true,
 	"host": true, "path": true, "service_name": true, "headers": true,
+	"encryption": true,
 }
 
 // withheldValue replaces an endpoint detail that was set. See endpointKeys. No angle brackets:

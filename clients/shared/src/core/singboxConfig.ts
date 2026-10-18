@@ -218,6 +218,24 @@ export function buildConfig(proxyOutbound: Record<string, unknown>): string {
     dns: buildDns(serverHost),
     inbounds: [tunInbound],
     outbounds: [proxyOutbound, { type: 'direct', tag: 'direct' }],
+
+    /*
+     * Keep the fakeip table across tunnel restarts.
+     *
+     * Every app holds fake addresses (198.18.0.0/15) that this tunnel handed out, and keeps them
+     * for as long as its own DNS cache says - which apps decide, not the TTL we answered with.
+     * libbox always opens this cache file (bbolt, in the app's files directory), but without
+     * store_fakeip the table lives only in memory: a reconnect, a server switch or the service
+     * being restarted forgets every mapping, and each connection to a remembered address then
+     * fails with
+     *
+     *   router: missing fakeip record, try enable `experimental.cache_file`
+     *
+     * until the app happens to look the name up again - to the user, an app that keeps dropping
+     * its connection after every reconnect. Same file and path as before; the table is all that
+     * is added to it.
+     */
+    experimental: { cache_file: { enabled: true, store_fakeip: true } },
     route: {
       auto_detect_interface: true,
 

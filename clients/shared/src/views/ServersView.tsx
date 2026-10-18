@@ -8,7 +8,7 @@ import { useNexus } from '../core/NexusProvider';
 import type { SubscriptionRecord, UseSubscriptions } from '../core/useSubscriptions';
 import { extractConfigUris, type SubscriptionUserinfo } from '../core/subscription';
 import { isQuicProtocol, pingTone, vpnLatencyTone, type ServerNode } from '../data/servers';
-import { formatTotal } from '../core/format';
+import { formatQuota } from '../core/format';
 import { coreEvents } from '../core/coreEvents';
 import { usePlatform } from '../platform';
 import { useServerTests, type DelayCell, type TcpCell, type TestAllSummary } from '../core/useServerTests';
@@ -24,7 +24,7 @@ export function ServersView({
 }) {
   const { core } = usePlatform();
   const toast = useToast();
-  const { connection } = useNexus();
+  const { connection, activeConfig } = useNexus();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -93,11 +93,30 @@ export function ServersView({
    * through a state where neither version exists.
    */
   const handleEditSave = (original: ServerNode, updated: ServerNode) => {
-    subs.replaceNode(original.id, updated);
+    // The stored node, which carries the REALITY ML-KEM switch over from the original.
+    const stored = subs.replaceNode(original.id, updated);
     // Follow the edit: if the user was pointed at this node, they still mean to be, and the
     // old id is about to stop existing.
-    if (selectedId === original.id) onSelect(updated);
+    if (selectedId === original.id) onSelect(stored);
   };
+
+  /**
+   * The sheet's REALITY ML-KEM switch. Read from the live list rather than the sheet's copy
+   * of the node, which is a snapshot taken when the sheet opened.
+   */
+  const sheetMlkem = (() => {
+    if (sheet === null) return null;
+    const live = subs.nodes.find((n) => n.id === sheet.node.id) ?? sheet.node;
+    return {
+      state: subs.realityMlkem(live),
+      running: activeConfig !== null && live.config === activeConfig,
+      onChange: (on: boolean) => {
+        if (subs.setRealityMlkem(live, on)) {
+          toast(on ? 'ML-KEM on for this server' : 'ML-KEM off for this server');
+        }
+      },
+    };
+  })();
 
   /**
    * A scanned QR is treated exactly like a paste.
@@ -406,6 +425,7 @@ export function ServersView({
       <NodeSheet
         node={sheet?.node ?? null}
         initialTab={sheet?.tab ?? 'details'}
+        mlkem={sheetMlkem}
         onSave={handleEditSave}
         onClose={() => setSheet(null)}
         onToast={toast}
@@ -494,10 +514,10 @@ function UserinfoPanel({ info }: { info: SubscriptionUserinfo | null }) {
         <div>
           <div className="flex items-center justify-between text-[11px] font-mono mb-1.5">
             <span className="text-slate-300 font-semibold">
-              {formatTotal(used)} <span className="text-brand-muted font-normal">/ {formatTotal(total)}</span>
+              {formatQuota(used)} <span className="text-brand-muted font-normal">/ {formatQuota(total)}</span>
             </span>
             <span className={ratio > 0.9 ? 'text-rose-400 font-medium' : 'text-brand-orange font-medium'}>
-              Remaining: {formatTotal(remaining ?? 0)}
+              Remaining: {formatQuota(remaining ?? 0)}
             </span>
           </div>
           <div className="w-full h-2 rounded-full bg-brand-navy border border-brand-border/80 overflow-hidden">

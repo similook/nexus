@@ -22,6 +22,20 @@ export function formatTotal(bytes: number): string {
   return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 }
 
+/**
+ * A subscription's used / total / remaining quota, in the units its panel uses.
+ *
+ * Panels (3x-ui and the rest) count a GB as 1024^3 bytes and label it "GB", and the
+ * Subscription-Userinfo header carries those bytes. Formatting them with formatTotal's decimal
+ * units showed a 50 GB plan as "53.7 GB" - the app disagreeing with the panel about the same
+ * number. Live traffic totals keep formatTotal; this is only for figures a panel also shows.
+ */
+export function formatQuota(bytes: number): string {
+  if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 ** 3) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
 /** HH:MM:SS, matching #uptime-text. */
 export function formatUptime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);

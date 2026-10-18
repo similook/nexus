@@ -66,6 +66,12 @@ export interface NexusApi extends NexusState {
     onCountdown?: (secondsRemaining: number) => void,
   ) => Promise<void>;
   readLogs: (limit?: number) => Promise<string[]>;
+  /**
+   * The config of the tunnel this app started, once the core confirmed it: set by the 'started'
+   * that answers our own connect(), cleared by any confirmed stop. Null when nothing is running
+   * or the app cannot vouch for what is (a start it did not ask for never names a config).
+   */
+  activeConfig: string | null;
   /** Fixed-capacity downlink history for a sparkline. Never grows (R5). */
   history: readonly number[];
 }
@@ -164,6 +170,14 @@ export function useNexusCore(): NexusApi {
   const { core, appState } = usePlatform();
   const [state, setState] = useState<NexusState>(INITIAL);
   const [history, setHistory] = useState<number[]>([]);
+
+  /**
+   * See NexusApi.activeConfig. pendingConfigRef carries the config from connect() to the
+   * 'started' that answers it - across the administrator prompt too, which on desktop can take
+   * as long as the user takes - and every failure or stop clears it.
+   */
+  const [activeConfig, setActiveConfig] = useState<string | null>(null);
+  const pendingConfigRef = useRef<string | null>(null);
 
   /**
    * Origin for the uptime clock, on the performance.now() timeline.
@@ -349,6 +363,15 @@ export function useNexusCore(): NexusApi {
     // history it is about to resume displaying.
     if (serviceState === 'stopped') setHistory([]);
 
+    // Which config is running, when we can vouch for it (NexusApi.activeConfig).
+    if (serviceState === 'started' && pendingConfigRef.current !== null) {
+      setActiveConfig(pendingConfigRef.current);
+      pendingConfigRef.current = null;
+    } else if (serviceState === 'stopped') {
+      setActiveConfig(null);
+      pendingConfigRef.current = null;
+    }
+
     // Record the teardown for switchTo, regardless of what the UI was told to render.
     if (serviceState === 'stopped') stopConfirmedRef.current = true;
 
@@ -472,6 +495,7 @@ export function useNexusCore(): NexusApi {
     async (config: string, name?: string) => {
       if (transitionRef.current) return;
       transitionRef.current = true;
+      pendingConfigRef.current = config;
 
       setState((prev) => ({ ...prev, connection: 'connecting', error: null }));
 
@@ -486,6 +510,7 @@ export function useNexusCore(): NexusApi {
         watchdogRef.current = null;
         switchingRef.current = false;
         connectedAtRef.current = null;
+        pendingConfigRef.current = null;
         // Stop whatever half-started, so the core is not left running behind a UI that has
         // given up on it. Failures here are expected - there may be nothing to stop.
         void Promise.resolve(core.stop()).catch(() => {});
@@ -532,6 +557,7 @@ export function useNexusCore(): NexusApi {
         // dialog is a choice; everything else that fails must be shown.
         const denied = /VPN permission denied/i.test(message);
         connectedAtRef.current = null;
+        pendingConfigRef.current = null;
         setState((prev) => ({
           ...prev,
           // A declined consent dialog is a normal outcome, not a failure to display in red.
@@ -568,6 +594,8 @@ export function useNexusCore(): NexusApi {
     try {
       await core.stop();
       connectedAtRef.current = null;
+      pendingConfigRef.current = null;
+      setActiveConfig(null);
       setState({ ...INITIAL });
       setHistory([]);
     } catch (e) {
@@ -690,5 +718,5 @@ export function useNexusCore(): NexusApi {
     return lines;
   }, []);
 
-  return { ...state, connect, disconnect, toggle, switchTo, readLogs, history };
+  return { ...state, activeConfig, connect, disconnect, toggle, switchTo, readLogs, history };
 }

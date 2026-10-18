@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePlatform } from '../platform';
 import { applyEdit, describeNode, editableOf } from '../core/nodeDetails';
+import type { RealityMlkemState } from '../core/realityMlkem';
 import type { ServerNode } from '../data/servers';
 
 /**
@@ -12,15 +13,25 @@ import type { ServerNode } from '../data/servers';
 
 export type NodeSheetTab = 'details' | 'edit' | 'share';
 
+/** The per-node REALITY ML-KEM switch, as the sheet shows it (realityMlkem.ts). */
+export interface MlkemSwitch {
+  state: RealityMlkemState;
+  /** The tunnel this app started runs this node: it keeps the config it started with. */
+  running: boolean;
+  onChange: (on: boolean) => void;
+}
+
 export function NodeSheet({
   node,
   initialTab,
+  mlkem,
   onSave,
   onClose,
   onToast,
 }: {
   node: ServerNode | null;
   initialTab: NodeSheetTab;
+  mlkem: MlkemSwitch | null;
   onSave: (original: ServerNode, updated: ServerNode) => void;
   onClose: () => void;
   onToast: (message: string, icon?: string) => void;
@@ -165,6 +176,7 @@ export function NodeSheet({
                   {revealed ? 'Hide credentials' : 'Reveal credentials'}
                 </button>
               )}
+              {mlkem !== null && mlkem.state !== 'unsupported' && <MlkemRow {...mlkem} />}
             </dl>
           )}
 
@@ -248,6 +260,43 @@ export function NodeSheet({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * REALITY nodes only. OFF sends the handshake every earlier build sent; ON adds the
+ * X25519MLKEM768 key share that Xray-core v26.9.8+ servers insist on. A link that opts in by
+ * itself shows ON and cannot be turned off here - the link is what the panel issued.
+ */
+function MlkemRow({ state, running, onChange }: MlkemSwitch) {
+  const on = state === 'on' || state === 'link';
+  const locked = state === 'link' || running;
+  const note =
+    state === 'link' ? "Turned on by this server's link."
+    : running ? 'This server is connected. Disconnect to change it; the running tunnel keeps the setting it started with.'
+    : 'For REALITY servers that fail with "Handshake failed" because the panel leaves this out of the link (Xray 26.9.8 or newer). Off sends the same handshake as before. Run Test All after changing it.';
+
+  return (
+    <div className="mt-4 p-3 rounded-xl bg-brand-navy border border-brand-border space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold text-slate-200">ML-KEM key share (X25519MLKEM768)</span>
+        <button
+          role="switch"
+          aria-checked={on}
+          aria-label="ML-KEM key share"
+          disabled={locked}
+          onClick={() => onChange(!on)}
+          className={`relative w-10 h-6 shrink-0 rounded-full border transition-colors disabled:opacity-40 ${
+            on ? 'bg-brand-orange border-brand-orange' : 'bg-brand-surface border-brand-border'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-5' : 'left-0.5'}`}
+          />
+        </button>
+      </div>
+      <p className="text-[11px] text-brand-muted leading-relaxed">{note}</p>
     </div>
   );
 }
