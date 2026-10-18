@@ -1568,10 +1568,13 @@ func TestProbeAcceptsEveryGeneratedLinkShape(t *testing.T) {
 			if outbound["server"] != "example.com" {
 				t.Fatalf("%s: fixture server is not the placeholder host", id)
 			}
-			if transport, _ := outbound["transport"].(map[string]any); transport != nil && transport["type"] == "grpc" {
+			transport, _ := outbound["transport"].(map[string]any)
+			if transport != nil && transport["type"] == "grpc" {
 				lazy[id] = true
 			}
-			if outbound["type"] == "hysteria2" || outbound["type"] == "tuic" {
+			// V2Ray's quic transport rides UDP like the QUIC protocols: a dead UDP port times out
+			// rather than refusing.
+			if outbound["type"] == "hysteria2" || outbound["type"] == "tuic" || (transport != nil && transport["type"] == "quic") {
 				outbound["server_port"], quic[id] = h.deadUDP, true
 			} else {
 				outbound["server_port"] = h.deadTCP

@@ -1,0 +1,4 @@
+# The sing-box patches are applied byte for byte by core/scripts/prepare-sing-box.sh. A Windows
+# checkout with core.autocrlf=true would otherwise rewrite them to CRLF, and `git apply` then
+# rejects every hunk against the LF upstream source.
+core/patches/** -text

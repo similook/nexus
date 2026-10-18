@@ -6,6 +6,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+bash ./scripts/prepare-sing-box.sh
 
 OUT="${OUT:-build/apple/Nexus.xcframework}"
 IOS_VERSION="${IOS_VERSION:-15.0}"

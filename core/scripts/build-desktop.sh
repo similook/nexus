@@ -21,6 +21,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+bash ./scripts/prepare-sing-box.sh
 
 # The same tag set as build-android.sh, deliberately.
 #

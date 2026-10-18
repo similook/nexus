@@ -31,6 +31,10 @@ local.properties
 # look optional.
 clients/web/android/app/libs/*.aar
 
+# The patched sing-box source, generated from the verified release by
+# core/scripts/prepare-sing-box.sh. The reviewed change is core/patches/sing-box/.
+core/third_party/
+
 # Capacitor copies the built web bundle in here on every sync.
 clients/web/android/app/src/main/assets/public/
 clients/web/android/app/src/main/assets/capacitor.config.json

@@ -17,12 +17,14 @@ desktop:
 	./scripts/build-desktop.sh
 
 test:
+	bash ./scripts/prepare-sing-box.sh
 	go test ./nexuscore/...
 
 # Separate from `test` because these BIND A LOOPBACK PORT (127.0.0.1:12080) and start a real
 # sing-box. No privileges and no routing changes - but it is a side effect, and a target named
 # `test` should not surprise anyone with one.
 test-desktop:
+	bash ./scripts/prepare-sing-box.sh
 	go test -tags "with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api" -count=1 ./desktop/...
 
 # The same suite under the race detector.
@@ -33,6 +35,7 @@ test-desktop:
 # every client from a ticker while request handlers mutate the same state. Run this on Linux
 # or in CI before trusting a change to either.
 test-desktop-race:
+	bash ./scripts/prepare-sing-box.sh
 	CGO_ENABLED=1 go test -race -tags "with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api" -count=1 ./desktop/...
 
 clean:

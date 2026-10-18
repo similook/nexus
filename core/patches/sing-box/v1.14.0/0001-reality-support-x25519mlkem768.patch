@@ -1,0 +1,88 @@
+diff --git a/common/tls/reality_client.go b/common/tls/reality_client.go
+index af64ef6..63cef1f 100644
+--- a/common/tls/reality_client.go
++++ b/common/tls/reality_client.go
+@@ -45,10 +45,11 @@ import (
+ var _ ConfigCompat = (*RealityClientConfig)(nil)
+ 
+ type RealityClientConfig struct {
+-	ctx       context.Context
+-	uClient   *UTLSClientConfig
+-	publicKey []byte
+-	shortID   [8]byte
++	ctx                   context.Context
++	uClient               *UTLSClientConfig
++	publicKey             []byte
++	shortID               [8]byte
++	supportX25519MLKEM768 bool
+ }
+ 
+ func NewRealityClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
+@@ -84,7 +85,7 @@ func newRealityClient(ctx context.Context, logger logger.ContextLogger, serverAd
+ 		return nil, E.New("invalid short_id")
+ 	}
+ 
+-	var config Config = &RealityClientConfig{ctx, uClient.(*UTLSClientConfig), publicKey, shortID}
++	var config Config = &RealityClientConfig{ctx, uClient.(*UTLSClientConfig), publicKey, shortID, options.Reality.SupportX25519MLKEM768}
+ 	if options.KernelRx || options.KernelTx {
+ 		if !C.IsLinux {
+ 			return nil, E.New("kTLS is only supported on Linux")
+@@ -145,22 +146,26 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	for _, extension := range uConn.Extensions {
+-		if ce, ok := extension.(*utls.SupportedCurvesExtension); ok {
+-			ce.Curves = common.Filter(ce.Curves, func(curveID utls.CurveID) bool {
+-				return curveID != utls.X25519MLKEM768
+-			})
++	// Nexus patch: the strip is unchanged unless the outbound opts in. REALITY servers since
++	// XTLS/REALITY 8cdf7bf (Xray v26.9.8) reject a Client Hello without X25519MLKEM768.
++	if !e.supportX25519MLKEM768 {
++		for _, extension := range uConn.Extensions {
++			if ce, ok := extension.(*utls.SupportedCurvesExtension); ok {
++				ce.Curves = common.Filter(ce.Curves, func(curveID utls.CurveID) bool {
++					return curveID != utls.X25519MLKEM768
++				})
++			}
++			if ks, ok := extension.(*utls.KeyShareExtension); ok {
++				ks.KeyShares = common.Filter(ks.KeyShares, func(share utls.KeyShare) bool {
++					return share.Group != utls.X25519MLKEM768
++				})
++			}
+ 		}
+-		if ks, ok := extension.(*utls.KeyShareExtension); ok {
+-			ks.KeyShares = common.Filter(ks.KeyShares, func(share utls.KeyShare) bool {
+-				return share.Group != utls.X25519MLKEM768
+-			})
++		err = uConn.BuildHandshakeState()
++		if err != nil {
++			return nil, err
+ 		}
+ 	}
+-	err = uConn.BuildHandshakeState()
+-	if err != nil {
+-		return nil, err
+-	}
+ 
+ 	if len(uConfig.NextProtos) > 0 {
+ 		for _, extension := range uConn.Extensions {
+@@ -271,6 +276,7 @@ func (e *RealityClientConfig) Clone() Config {
+ 		e.uClient.Clone().(*UTLSClientConfig),
+ 		e.publicKey,
+ 		e.shortID,
++		e.supportX25519MLKEM768,
+ 	}
+ }
+ 
+diff --git a/option/tls.go b/option/tls.go
+index 5c807d6..9dd6913 100644
+--- a/option/tls.go
++++ b/option/tls.go
+@@ -253,4 +253,6 @@ type OutboundRealityOptions struct {
+ 	Enabled   bool   `json:"enabled,omitempty"`
+ 	PublicKey string `json:"public_key,omitempty"`
+ 	ShortID   string `json:"short_id,omitempty"`
++	// Nexus patch: keep the fingerprint's X25519MLKEM768 key share instead of stripping it.
++	SupportX25519MLKEM768 bool `json:"support_x25519mlkem768,omitempty"`
+ }

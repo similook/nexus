@@ -7,9 +7,15 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+bash ./scripts/prepare-sing-box.sh
 
 OUT="${OUT:-build/android/nexus.aar}"
 ANDROID_API="${ANDROID_API:-21}"
+# The ABIs the AAR carries - and so the ones the APK supports (gomobile -target). arm64 alone
+# by default. A build that must also run on 32-bit phones (Xiaomi GetApps machine-tests on older
+# models) adds android/arm: ANDROID_TARGETS=android/arm,android/arm64. That roughly doubles the
+# native library in the APK.
+ANDROID_TARGETS="${ANDROID_TARGETS:-android/arm64}"
 
 # See README.md "Build tags". Verify against the pinned sing-box release's Makefile —
 # the tag list moves between releases.
@@ -45,7 +51,7 @@ mkdir -p "$(dirname "$OUT")"
 # Flags are identical across platforms so the two builds stay comparable in bench runs.
 gomobile bind \
   -v \
-  -target=android/arm64 \
+  -target="$ANDROID_TARGETS" \
   -androidapi "$ANDROID_API" \
   -javapkg=io.nexus \
   -tags "$TAGS" \
