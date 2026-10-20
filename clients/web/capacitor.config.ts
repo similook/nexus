@@ -40,6 +40,15 @@ const config: CapacitorConfig = {
       process.env.VITE_NEXUS_ADS,
     ),
   },
+  ios: {
+    // Never AdMob on iOS, whatever the build sets: App Review 5.4 bars a VPN app from sharing
+    // user data with third parties, and the plugin would also need App Tracking Transparency
+    // (ios-plan/IOS-PLAN.md). androidPlugins with no ads mode is exactly "every plugin but AdMob".
+    includePlugins: androidPlugins(
+      [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})],
+      undefined,
+    ),
+  },
 };
 
 export default config;

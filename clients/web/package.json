@@ -23,6 +23,7 @@
     "@capacitor/app": "^6.0.2",
     "@capacitor/clipboard": "^6.0.3",
     "@capacitor/core": "^6.2.0",
+    "@capacitor/ios": "^6.2.2",
     "@fontsource/jetbrains-mono": "^5.1.1",
     "@fontsource/plus-jakarta-sans": "^5.1.0",
     "jsqr": "^1.4.0",

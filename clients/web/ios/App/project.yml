@@ -1,0 +1,94 @@
+# XcodeGen spec for the iOS app. The Xcode project is generated from this file
+# (`xcodegen generate` in clients/web/ios/App -> Nexus.xcodeproj), never edited by hand: there
+# is no Mac in the loop, and a generated project is reviewable as text.
+# ios-plan/phase2-design.md has the design.
+#
+# App.xcodeproj beside it is Capacitor's own template project and is NOT what gets built. It is
+# kept because `npx cap sync ios` reads its IPHONEOS_DEPLOYMENT_TARGET to write
+# CapApp-SPM/Package.swift. Open Nexus.xcodeproj on a Mac.
+#
+#   App           Capacitor WebView UI (clients/web) + the NexusCore plugin (Plugin/)
+#   PacketTunnel  NEPacketTunnelProvider running the core (PacketTunnel/), ~50 MB ceiling
+#
+# Both link the gomobile Nexus.xcframework (core/scripts/build-apple.sh). It is a static
+# framework, so each binary links its own copy and nothing is embedded.
+name: Nexus
+options:
+  bundleIdPrefix: io.nexus
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    MARKETING_VERSION: "1.3.4"
+    CURRENT_PROJECT_VERSION: "8"
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_BITCODE: NO
+    # Signing comes from the CI signing step once the Apple account exists; until then CI
+    # builds with CODE_SIGNING_ALLOWED=NO.
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  CapApp-SPM:
+    path: CapApp-SPM
+
+targets:
+  App:
+    type: application
+    platform: iOS
+    scheme: {}
+    sources:
+      - path: App
+        excludes:
+          - public
+          - Info.plist
+          - App.entitlements
+      # Capacitor's web assets, a folder reference as in Capacitor's own template.
+      - path: App/public
+        type: folder
+        buildPhase: resources
+      - path: Plugin
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_NAME: App
+        PRODUCT_BUNDLE_IDENTIFIER: io.nexus.app
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/Frameworks"]
+        OTHER_LDFLAGS: ["$(inherited)", "-lresolv"]
+    dependencies:
+      - package: CapApp-SPM
+        product: CapApp-SPM
+      - framework: ../../../../core/build/apple/Nexus.xcframework
+        embed: false
+      - sdk: NetworkExtension.framework
+      - target: PacketTunnel
+
+  PacketTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PacketTunnel
+        excludes:
+          - Info.plist
+          - PacketTunnel.entitlements
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_NAME: PacketTunnel
+        PRODUCT_BUNDLE_IDENTIFIER: io.nexus.app.tunnel
+        INFOPLIST_FILE: PacketTunnel/Info.plist
+        CODE_SIGN_ENTITLEMENTS: PacketTunnel/PacketTunnel.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks"]
+        OTHER_LDFLAGS: ["$(inherited)", "-lresolv"]
+    dependencies:
+      - framework: ../../../../core/build/apple/Nexus.xcframework
+        embed: false
+      - sdk: NetworkExtension.framework

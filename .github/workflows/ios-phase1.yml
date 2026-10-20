@@ -1,8 +1,13 @@
-# iOS phase 1, without a Mac or an iPhone (ios-plan/IOS-PLAN.md):
-#   1. Nexus.xcframework builds for iOS from the patched core (core/scripts/build-apple.sh).
-#   2. bench/B-03 host proxy: the patched core's memory under load on macOS arm64, with the
-#      extension's runtime policy. An estimate until a device run replaces it (bench/B-03).
-# Manual or on pushes to ios/** branches only; nothing here signs, uploads to Apple or publishes.
+# iOS without a Mac or an iPhone (ios-plan/IOS-PLAN.md):
+#   core-apple  Nexus.xcframework from the patched core (core/scripts/build-apple.sh)
+#   b03         bench/B-03 host proxy: the patched core's memory under load on macOS arm64, with the
+#               extension's runtime policy. An estimate until a device run replaces it (bench/B-03)
+#   ios-app     the app and the packet-tunnel extension (clients/web/ios/App/project.yml), built
+#               UNSIGNED - proof that everything compiles before an Apple account or a phone exists
+# Manual or on pushes to ios/** branches only. Nothing here signs, uploads to Apple or publishes.
+#
+# Logs and step summaries need a signed-in viewer; check-run annotations do not. Failures put
+# their log tail into one error annotation (newlines escaped as %0A).
 name: ios-phase1
 
 on:
@@ -13,50 +18,68 @@ on:
 permissions:
   contents: read
 
+env:
+  TAGS: with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api
+  GOMOBILE: v0.0.0-20260908204917-8b95e45f8d3e   # the golang.org/x/mobile version core/go.mod pins
+
 jobs:
   core-apple:
     runs-on: macos-15
-    timeout-minutes: 90
-    env:
-      TAGS: with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.1'
           cache-dependency-path: core/go.sum
-
       - name: Patched sing-box
         run: bash core/scripts/prepare-sing-box.sh
-
-      - name: gomobile (the version core/go.mod pins)
+      - name: gomobile
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260908204917-8b95e45f8d3e
-          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20260908204917-8b95e45f8d3e
+          go install golang.org/x/mobile/cmd/gomobile@$GOMOBILE
+          go install golang.org/x/mobile/cmd/gobind@$GOMOBILE
           gomobile init
-
       - name: Build Nexus.xcframework
         working-directory: core
         run: |
           set -o pipefail
-          ./scripts/build-apple.sh 2>&1 | tee "$RUNNER_TEMP/build-apple.log"
-
+          bash ./scripts/build-apple.sh 2>&1 | tee "$RUNNER_TEMP/build-apple.log"
       - name: Framework report
         working-directory: core
         run: |
           {
-            echo "## Nexus.xcframework"
-            echo '```'
-            du -sh build/apple/Nexus.xcframework
-            du -sh build/apple/Nexus.xcframework/*
+            echo "## Nexus.xcframework"; echo '```'
+            du -sh build/apple/Nexus.xcframework build/apple/Nexus.xcframework/*
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          ditto -c -k --keepParent build/apple/Nexus.xcframework "$RUNNER_TEMP/Nexus.xcframework.zip"
+          # The generated Objective-C headers are the Swift side's API; keep them reviewable.
+          find build/apple/Nexus.xcframework -path '*ios-arm64/*' -name '*.h' | head -20
+          echo "::notice title=xcframework size::$(du -sh build/apple/Nexus.xcframework | cut -f1)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nexus.xcframework
+          path: core/build/apple/Nexus.xcframework
+          retention-days: 7
+      - name: Failure tail
+        if: failure()
+        run: |
+          f="$RUNNER_TEMP/build-apple.log"; [ -f "$f" ] || exit 0
+          tail="$(tail -n 60 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          echo "::error title=build-apple.log tail::${tail}"
 
+  b03:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: core/go.sum
+      - name: Patched sing-box
+        run: bash core/scripts/prepare-sing-box.sh
       - name: Xray 26.9.9 (the B-03 server)
         run: GOBIN="$RUNNER_TEMP/xray" go install github.com/xtls/xray-core/main@v1.260327.1-0.20260908222543-52a412d9e2f5
-
       - name: B-03 host proxy (macOS arm64)
         working-directory: core
         env:
@@ -67,26 +90,64 @@ jobs:
           set -o pipefail
           go test -count=1 -tags "$TAGS,nexus_bench" -ldflags=-checklinkname=0 ./nexuscore/ -run '^TestB03Memory$' -v -timeout 0 2>&1 | tee "$RUNNER_TEMP/b03.log"
           cat "$B03_OUT/result.md" >> "$GITHUB_STEP_SUMMARY"
-
-      # Logs and summaries need a signed-in viewer; annotations do not (check-runs API). On
-      # failure the log tail goes into one error annotation, newlines escaped as %0A.
-      - name: Failure tail
-        if: failure()
-        run: |
-          for f in "$RUNNER_TEMP/build-apple.log" "$RUNNER_TEMP/b03.log"; do
-            [ -f "$f" ] || continue
-            { echo "## $(basename "$f") (last 80 lines)"; echo '```'; tail -n 80 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-            tail="$(tail -n 60 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
-            echo "::error title=$(basename "$f") tail::${tail}"
-          done
-
+          # The result table, public as annotations (one per arm row).
+          grep '^| ' "$B03_OUT/result.md" | tail -n +3 | while read -r row; do echo "::notice title=B-03 host proxy::$row"; done
       - uses: actions/upload-artifact@v4
         with:
           name: b03-macos
           path: bench/runs/ci-B-03-macos
+      - name: Failure tail
+        if: failure()
+        run: |
+          f="$RUNNER_TEMP/b03.log"; [ -f "$f" ] || exit 0
+          tail="$(tail -n 60 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          echo "::error title=b03.log tail::${tail}"
 
-      - uses: actions/upload-artifact@v4
+  ios-app:
+    needs: core-apple
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           name: Nexus.xcframework
-          path: ${{ runner.temp }}/Nexus.xcframework.zip
-          retention-days: 7
+          path: core/build/apple/Nexus.xcframework
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: clients/web/package-lock.json
+      - name: Web build
+        working-directory: clients/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: XcodeGen
+        run: brew install xcodegen
+      - name: Generate Nexus.xcodeproj, then sync Capacitor (rewrites CapApp-SPM/Package.swift)
+        working-directory: clients/web
+        run: |
+          (cd ios/App && xcodegen generate)
+          npx cap sync ios
+      - name: Build (unsigned)
+        working-directory: clients/web/ios/App
+        run: |
+          set -o pipefail
+          xcodebuild -project Nexus.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) NEXUS_B03' \
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E 'error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)' | head -200
+      - name: App report
+        run: |
+          app=$(find "$RUNNER_TEMP/dd/Build/Products" -name 'App.app' -maxdepth 3 | head -1)
+          echo "::notice title=App.app::$(du -sh "$app" | cut -f1); extension: $(du -sh "$app/PlugIns/PacketTunnel.appex" | cut -f1)"
+      - name: Failure tail
+        if: failure()
+        run: |
+          f="$RUNNER_TEMP/xcodebuild.log"; [ -f "$f" ] || exit 0
+          errs="$(grep -E 'error:' "$f" | sort -u | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          echo "::error title=xcodebuild errors::${errs}"
+          tail="$(tail -n 40 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          echo "::error title=xcodebuild tail::${tail}"
