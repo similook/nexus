@@ -201,7 +201,7 @@ final class ExtensionPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         first.wait()
     }
 
-    private func updateDefaultInterface(_ listener: LibboxInterfaceUpdateListenerProtocol, _ path: NWPath) {
+    private func updateDefaultInterface(_ listener: LibboxInterfaceUpdateListenerProtocol, _ path: Network.NWPath) {
         guard path.status != .unsatisfied, let interface = path.availableInterfaces.first else {
             listener.updateDefaultInterface("", interfaceIndex: -1, isExpensive: false, isConstrained: false)
             return
@@ -261,12 +261,12 @@ final class ExtensionPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         nil
     }
 
-    func usePlatformAutoDetectInterfaceControl() -> Bool {
+    func usePlatformAutoDetectControl() -> Bool {
         // The provider's own sockets already bypass its tunnel.
         false
     }
 
-    func autoDetectInterfaceControl(_: Int32) throws {}
+    func autoDetectControl(_: Int32) throws {}
 
     func useProcFS() -> Bool {
         false

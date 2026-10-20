@@ -1,0 +1,173 @@
+# Signed iOS build uploaded to TestFlight, for the borrowed-phone session
+# (ios-plan/DEVICE-SESSION.md). Runs only on a push to the ios/testflight branch: that push IS the
+# decision to upload. workflow_dispatch would need this file on the default branch.
+#
+# Does nothing until the Apple Developer account exists and these repository secrets are set
+# (Settings > Secrets and variables > Actions). Without them the gate job leaves a notice and
+# the run ends green with nothing built or uploaded.
+#   APPLE_TEAM_ID       the account's 10-character Team ID
+#   ASC_KEY_ID          an App Store Connect API key (Users and Access > Integrations), role App Manager
+#   ASC_ISSUER_ID       that key's issuer ID
+#   ASC_KEY_P8_BASE64   the key's .p8 file, base64-encoded (base64 -i AuthKey_XXXX.p8)
+#
+# Once, in the account, before the first run:
+#   - App Store Connect: an app record for bundle ID io.nexus.app (the upload needs it).
+#   - Automatic signing below registers io.nexus.app, io.nexus.app.tunnel and group.io.nexus.app
+#     with the Network Extensions and App Groups capabilities. If the account refuses, create
+#     them by hand in Certificates, Identifiers & Profiles.
+#   - Info.plist says ITSAppUsesNonExemptEncryption = true, so each build waits on the export
+#     compliance answer in App Store Connect before testers see it.
+#
+# The build keeps NEXUS_B03 (memory samples for Export diagnostics). The App Store build of
+# phase 5 drops it.
+name: ios-testflight
+
+on:
+  push:
+    branches: ['ios/testflight']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+env:
+  TAGS: with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api
+  GOMOBILE: v0.0.0-20260908204917-8b95e45f8d3e   # the golang.org/x/mobile version core/go.mod pins
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          missing=""
+          for name in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=TestFlight not configured::missing secrets:$missing. Nothing was built or uploaded."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  testflight:
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: core/go.sum
+      # The same core build as ios-phase1.yml's core-apple job.
+      - name: Patched sing-box
+        run: bash core/scripts/prepare-sing-box.sh
+      - name: gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@$GOMOBILE
+          go install golang.org/x/mobile/cmd/gobind@$GOMOBILE
+          gomobile init
+      - name: Build Nexus.xcframework
+        working-directory: core
+        run: |
+          set -o pipefail
+          bash ./scripts/build-apple.sh 2>&1 | tee "$RUNNER_TEMP/build.log"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: clients/web/package-lock.json
+      - name: Web build
+        working-directory: clients/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: XcodeGen
+        run: brew install xcodegen
+      # Same order as ios-phase1.yml: cap copy, XcodeGen, cap sync.
+      - name: Generate Nexus.xcodeproj and sync Capacitor
+        working-directory: clients/web
+        run: |
+          set -o pipefail
+          {
+            npx cap copy ios
+            (cd ios/App && xcodegen generate)
+            npx cap sync ios
+          } 2>&1 | tee -a "$RUNNER_TEMP/build.log"
+      - name: API key
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          umask 077
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/asc-key.p8"
+      # Build number: this workflow's run number, so every upload is higher than the last.
+      - name: Archive (signed)
+        working-directory: clients/web/ios/App
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -project Nexus.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/dd" \
+            -archivePath "$RUNNER_TEMP/Nexus.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc-key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) NEXUS_B03' \
+            archive 2>&1 | tee -a "$RUNNER_TEMP/build.log" | grep -E 'error:|ARCHIVE (SUCCEEDED|FAILED)' | head -200
+      - name: Upload to TestFlight
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Nexus.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc-key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee -a "$RUNNER_TEMP/build.log" | grep -E 'error:|EXPORT (SUCCEEDED|FAILED)|Upload' | head -100
+          echo "::notice title=TestFlight::build $GITHUB_RUN_NUMBER uploaded; App Store Connect processes it before testers see it"
+      - name: Remove the API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc-key.p8"
+      - name: Failure tail
+        if: failure()
+        run: |
+          f="$RUNNER_TEMP/build.log"; [ -f "$f" ] || exit 0
+          errs="$(grep -E 'error:' "$f" | sort -u | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          [ -n "$errs" ] && echo "::error title=errors::${errs}"
+          tail="$(tail -n 40 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          echo "::error title=build tail::${tail}"
