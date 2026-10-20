@@ -76,7 +76,7 @@ jobs:
           for f in "$RUNNER_TEMP/build-apple.log" "$RUNNER_TEMP/b03.log"; do
             [ -f "$f" ] || continue
             { echo "## $(basename "$f") (last 80 lines)"; echo '```'; tail -n 80 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-            tail="$(tail -n 60 "$f" | sed -e 's/%/%25/g' -e 's//%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            tail="$(tail -n 60 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
             echo "::error title=$(basename "$f") tail::${tail}"
           done
 
