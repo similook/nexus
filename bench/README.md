@@ -29,7 +29,7 @@ Measures ADR-0001 §5.2 / open question 6.2. Reconnect handshakes per day under 
 screen-on/off duty cycle, comparing sing-box's default "reset all TCP on pause" against a
 quiesce-only patch.
 
-## B-03 — Memory ceiling compliance
+## B-03 — Memory ceiling compliance  ·  [harness](B-03/) · **stage 1 (host proxy) runnable**
 
 Peak RSS of the Apple Network Extension process under a 1 h mixed-traffic soak, across
 `GOMEMLIMIT` settings. Must stay under the ~50 MB `NEPacketTunnelProvider` ceiling with

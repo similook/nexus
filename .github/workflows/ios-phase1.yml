@@ -1,0 +1,77 @@
+# iOS phase 1, without a Mac or an iPhone (ios-plan/IOS-PLAN.md):
+#   1. Nexus.xcframework builds for iOS from the patched core (core/scripts/build-apple.sh).
+#   2. bench/B-03 host proxy: the patched core's memory under load on macOS arm64, with the
+#      extension's runtime policy. An estimate until a device run replaces it (bench/B-03).
+# Manual or on pushes to ios/** branches only; nothing here signs, uploads to Apple or publishes.
+name: ios-phase1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ios/**']
+
+permissions:
+  contents: read
+
+jobs:
+  core-apple:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      TAGS: with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: core/go.sum
+
+      - name: Patched sing-box
+        run: bash core/scripts/prepare-sing-box.sh
+
+      - name: gomobile (the version core/go.mod pins)
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260908204917-8b95e45f8d3e
+          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20260908204917-8b95e45f8d3e
+          gomobile init
+
+      - name: Build Nexus.xcframework
+        working-directory: core
+        run: ./scripts/build-apple.sh
+
+      - name: Framework report
+        working-directory: core
+        run: |
+          {
+            echo "## Nexus.xcframework"
+            echo '```'
+            du -sh build/apple/Nexus.xcframework
+            du -sh build/apple/Nexus.xcframework/*
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          ditto -c -k --keepParent build/apple/Nexus.xcframework "$RUNNER_TEMP/Nexus.xcframework.zip"
+
+      - name: Xray 26.9.9 (the B-03 server)
+        run: GOBIN="$RUNNER_TEMP/xray" go install github.com/xtls/xray-core/main@v1.260327.1-0.20260908222543-52a412d9e2f5
+
+      - name: B-03 host proxy (macOS arm64)
+        working-directory: core
+        env:
+          NEXUS_XRAY_BIN: ${{ runner.temp }}/xray/main
+          B03_OUT: ${{ github.workspace }}/bench/runs/ci-B-03-macos
+          B03_CYCLES: '3'
+        run: |
+          go test -count=1 -tags "$TAGS,nexus_bench" -ldflags=-checklinkname=0 ./nexuscore/ -run '^TestB03Memory$' -v -timeout 0
+          cat "$B03_OUT/result.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b03-macos
+          path: bench/runs/ci-B-03-macos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nexus.xcframework
+          path: ${{ runner.temp }}/Nexus.xcframework.zip
+          retention-days: 7
