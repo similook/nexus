@@ -66,8 +66,8 @@ android {
         applicationId "io.nexus.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
-        versionName "1.3.3"
+        versionCode 8
+        versionName "1.3.4"
         // The AdMob app id behind src/ads/AndroidManifest.xml's APPLICATION_ID, in ads builds
         // only. Google's sample id unless the build passes a live one
         // (-PnexusAdmobAppId=ca-app-pub-...~...), which must belong to the same AdMob app as

@@ -1,7 +1,7 @@
 {
   "name": "nexus-web",
   "private": true,
-  "version": "1.3.3",
+  "version": "1.3.4",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "check-auto-refresh": "npx --yes tsx scripts/check-auto-refresh.mts",
     "check-update": "npx --yes tsx scripts/check-update.mts",
     "check-server-tests": "npx --yes tsx scripts/check-server-tests.mts",
-    "check-ads": "npx --yes tsx scripts/check-ads.mts"
+    "check-ads": "npx --yes tsx scripts/check-ads.mts",
+    "check-reality-mlkem-auto": "npx --yes tsx scripts/check-reality-mlkem-auto.mts"
   },
   "dependencies": {
     "@capacitor-community/admob": "6.2.0",
