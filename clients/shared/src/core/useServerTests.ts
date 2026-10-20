@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef } from 'react';
 import { coreEvents } from './coreEvents';
 import { usePlatform } from '../platform';
-import { ServerTestsController, type DelayCell, type TcpCell, type TestAllSummary } from './serverTests';
+import { ServerTestsController, type DelayCell, type MlkemRetry, type TcpCell, type TestAllSummary } from './serverTests';
 import type { ServerNode } from '../data/servers';
 
 export type { DelayCell, TcpCell, TestAllSummary } from './serverTests';
@@ -24,15 +24,22 @@ export interface ServerTests {
  * This is clients/web's useServerTests with one change: the core comes from the platform port,
  * not a global plugin. Events arrive through coreEvents, never a per-component addListener.
  */
-export function useServerTests(nodes: ServerNode[], onFinished?: (summary: TestAllSummary) => void): ServerTests {
+export function useServerTests(
+  nodes: ServerNode[],
+  onFinished?: (summary: TestAllSummary) => void,
+  /** The REALITY ML-KEM retry (serverTests.ts); none when omitted. */
+  mlkem?: MlkemRetry,
+): ServerTests {
   const { core } = usePlatform();
   const [, render] = useReducer((n: number) => n + 1, 0);
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const nodesRef = useRef(nodeById);
   const finishedRef = useRef(onFinished);
+  const mlkemRef = useRef(mlkem);
   useEffect(() => {
     nodesRef.current = nodeById;
     finishedRef.current = onFinished;
+    mlkemRef.current = mlkem;
   });
 
   const controllerRef = useRef<ServerTestsController | null>(null);
@@ -47,6 +54,10 @@ export function useServerTests(nodes: ServerNode[], onFinished?: (summary: TestA
     (id) => nodesRef.current.get(id),
     render,
     (summary) => finishedRef.current?.(summary),
+    {
+      variant: (node) => mlkemRef.current?.variant(node) ?? null,
+      verdict: (node, needed) => mlkemRef.current?.verdict(node, needed),
+    },
   );
   const controller = controllerRef.current;
 

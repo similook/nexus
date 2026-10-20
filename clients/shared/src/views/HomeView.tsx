@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNexus } from '../core/NexusProvider';
 import { usePlatform } from '../platform';
 import { RoutingCard } from '../components/RoutingCard';
@@ -26,7 +27,16 @@ import { pingTone } from '../data/servers';
  * timer above the bridge undoes the design (see useNexusCore.ts).
  */
 
-export function HomeView({ node }: { node: ServerNode | null }) {
+export function HomeView({
+  node,
+  prepare,
+}: {
+  node: ServerNode | null;
+  /** The node as Connect must start it - App's prepareConnect (the REALITY ML-KEM check). */
+  prepare?: (node: ServerNode) => Promise<ServerNode>;
+}) {
+  // While prepare() looks at a REALITY server before its first Connect.
+  const [checking, setChecking] = useState(false);
   // Polled only while this screen is in the foreground - see useLivePing.
   const livePing = useLivePing(node);
   // Push-driven, no timer. Describes the device's own link, never the tunnel - see plugin.ts.
@@ -53,13 +63,15 @@ export function HomeView({ node }: { node: ServerNode | null }) {
   // The button used to be disabled during a connect, so its label only had to describe a
   // state. It is tappable now and performs an abort, so the label has to describe the ACTION -
   // a button that says CONNECTING reads as "wait", which is the opposite of what it does.
-  const label = isConnected ? 'DISCONNECT' : isBusy ? 'CANCEL' : 'CONNECT';
+  const label = isConnected ? 'DISCONNECT' : isBusy ? 'CANCEL' : checking ? 'CHECKING' : 'CONNECT';
 
   const title = isConnected
     ? 'Connected'
     : isBusy
       ? 'Establishing tunnel… (tap to cancel)'
-      : connection === 'error'
+      : checking
+        ? 'Checking the server…'
+        : connection === 'error'
         ? 'Connection failed'
         : 'Disconnected';
 
@@ -154,7 +166,28 @@ export function HomeView({ node }: { node: ServerNode | null }) {
 
           {/* #connect-btn */}
           <button
-            onClick={() => node !== null && void toggle(node.config, node.name)}
+            onClick={() => {
+              if (node === null) return;
+              if (isConnected || isBusy || prepare === undefined) {
+                void toggle(node.config, node.name);
+                return;
+              }
+              // A connect: first the REALITY ML-KEM check (once per server, App's
+              // prepareConnect), then the node exactly as it says to start it. A second tap
+              // while it runs is ignored rather than starting a second check.
+              if (checking) return;
+              setChecking(true);
+              void prepare(node).then(
+                (ready) => {
+                  setChecking(false);
+                  return toggle(ready.config, ready.name);
+                },
+                () => {
+                  setChecking(false);
+                  return toggle(node.config, node.name);
+                },
+              );
+            }}
             // NOT disabled while connecting.
             //
             // It used to be `disabled={isBusy || node === null}`, and that was half of why a

@@ -5,6 +5,8 @@ import { ToastProvider, useToast } from './components/Toast';
 import { NexusProvider, useNexus } from './core/NexusProvider';
 import { useSubscriptions } from './core/useSubscriptions';
 import { loadSelection, saveSelection } from './core/selection';
+import { coreEvents } from './core/coreEvents';
+import { checkRealityMlkem, type MlkemCheckBridge } from './core/realityMlkemCheck';
 import { protocolOf, type ServerNode } from './data/servers';
 import { HomeView } from './views/HomeView';
 import { LogsView } from './views/LogsView';
@@ -42,7 +44,7 @@ function Shell() {
    * The real question is "is the thing behind the port a simulation?", and only the
    * implementation can answer that. See the note in platform.ts.
    */
-  const { isStub } = usePlatform();
+  const { isStub, core } = usePlatform();
 
   // Lives here, not in ServersView: the selected node can come from a subscription, and the
   // Home tab has to keep rendering it after ServersView unmounts.
@@ -174,6 +176,28 @@ function Shell() {
    * When disconnected this only records the choice; nothing should start a tunnel because the
    * user tapped a list row.
    */
+  /**
+   * The node exactly as Connect must start it. A REALITY server no check has looked at yet is
+   * probed first, with and without the ML-KEM key share (realityMlkemCheck.ts): once per
+   * server, a couple of seconds. When it needs the share, the switch turns on and the rebuilt
+   * node comes back; otherwise the node is returned as it is. Never against the stub, whose
+   * probe is a simulation.
+   */
+  const prepareConnect = useCallback(
+    async (node: ServerNode): Promise<ServerNode> => {
+      if (isStub || !subs.realityMlkemUnchecked(node)) return node;
+      const bridge: MlkemCheckBridge = {
+        probeServers: (options) => core.probeServers(options),
+        cancelProbe: (options) => core.cancelProbe(options),
+        onProbe: (handler) => coreEvents.subscribe('serverProbe', handler),
+        onProbeDone: (handler) => coreEvents.subscribe('serverProbeDone', handler),
+      };
+      const needed = await checkRealityMlkem(node, bridge);
+      return needed === null ? node : subs.applyRealityMlkemVerdict(node, needed);
+    },
+    [isStub, core, subs],
+  );
+
   const chooseNode = useCallback(
     (node: ServerNode) => {
       userChoseRef.current = true;
@@ -184,20 +208,24 @@ function Shell() {
         // A switch is now a visible, several-second operation - stop, wait for the cache-file
         // lock to clear, then start - so it has to be narrated. Silence for four seconds after
         // tapping a server reads as a dropped tap, and the user taps another one.
-        toast('Switching server… stopping current tunnel', '⟳');
+        const checking = !isStub && subs.realityMlkemUnchecked(node);
+        toast(checking ? 'Switching server… checking it first' : 'Switching server… stopping current tunnel', '⟳');
 
-        void switchTo(node.config, node.name, (remaining) => {
-          // Toast.show() re-arms its own 2200 ms dismiss timer on every call, so calling it
-          // once a second keeps one toast on screen for the whole countdown rather than
-          // stacking four. No change to the component was needed.
-          toast(`Switching server… connecting in ${remaining}s`, '⟳');
-        }).catch(() => {
+        void (async () => {
+          const ready = await prepareConnect(node);
+          await switchTo(ready.config, ready.name, (remaining) => {
+            // Toast.show() re-arms its own 2200 ms dismiss timer on every call, so calling it
+            // once a second keeps one toast on screen for the whole countdown rather than
+            // stacking four. No change to the component was needed.
+            toast(`Switching server… connecting in ${remaining}s`, '⟳');
+          });
+        })().catch(() => {
           // Surfaced by ServersView's toast; swallowing here keeps selection working even if
           // the swap fails.
         });
       }
     },
-    [connection, switchTo, toast],
+    [connection, switchTo, toast, isStub, subs, prepareConnect],
   );
 
   return (
@@ -220,7 +248,7 @@ function Shell() {
         scrolling.
       */}
       <main className="flex-1 min-h-0 overflow-hidden">
-        {tab === 'home' && <HomeView node={selected} />}
+        {tab === 'home' && <HomeView node={selected} prepare={prepareConnect} />}
         {tab === 'servers' && (
           <ServersView selectedId={selected?.id ?? null} onSelect={chooseNode} subs={subs} />
         )}
