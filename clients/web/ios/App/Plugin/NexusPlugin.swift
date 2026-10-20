@@ -2,6 +2,7 @@ import Capacitor
 import Foundation
 import Nexus
 import NetworkExtension
+import UIKit
 
 /// The NexusCore Capacitor plugin on iOS: hop 1 of core/docs/ipc-boundary.md, the JSON bridge
 /// between the WebView and native code. Mirrors clients/web/src/core/plugin.ts and Android's
@@ -27,6 +28,7 @@ public class NexusCorePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "clearLogs", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setLogStreaming", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getInstallInfo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "exportDiagnostics", returnType: CAPPluginReturnPromise),
         // Phase 3:
         CAPPluginMethod(name: "selectOutbound", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "urlTest", returnType: CAPPluginReturnPromise),
@@ -164,6 +166,47 @@ public class NexusCorePlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func getInstallInfo(_ call: CAPPluginCall) {
         call.unavailable("The App Store updates this app; there is no in-app update check on iOS.")
+    }
+
+    // MARK: - diagnostics (bench/B-03 stage 2, ios-plan/DEVICE-SESSION.md)
+
+    /// Share sheet with one text file: build and device facts, then the extension's memory
+    /// samples. No log lines and no server details - it is meant to be sent to the developers.
+    @objc func exportDiagnostics(_ call: CAPPluginCall) {
+        let samples = (try? String(contentsOf: TunnelOptions.memoryLogURL, encoding: .utf8)) ?? ""
+        let info = Bundle.main.infoDictionary ?? [:]
+        var machine = utsname()
+        uname(&machine)
+        let model = withUnsafeBytes(of: &machine.machine) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        let header = [
+            "# Nexus B-03 device diagnostics",
+            "app \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))",
+            "core \(NexuscoreVersion())",
+            "device \(model), iOS \(UIDevice.current.systemVersion)",
+            "exported \(ISO8601DateFormatter().string(from: Date()))",
+            "columns: unix_ms os_proc_available_memory_bytes go_held_bytes",
+            "samples \(samples.split(separator: "\n").count)",
+            "",
+        ].joined(separator: "\n")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("nexus-b03-diagnostics.txt")
+        do {
+            try (header + samples).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            call.reject(error.localizedDescription)
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let controller = self?.bridge?.viewController else {
+                call.reject("no view to present from")
+                return
+            }
+            let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            sheet.popoverPresentationController?.sourceView = controller.view
+            controller.present(sheet, animated: true)
+            call.resolve()
+        }
     }
 
     // MARK: - phase 3

@@ -1,5 +1,6 @@
 #if NEXUS_B03
     import Foundation
+    import Nexus // Nexus.xcframework (gomobile): NexuscoreGoMemoryBytes
     import os
 
     /// bench/B-03 stage 2 (device): the extension's memory, once a second, while the tunnel runs.
@@ -9,7 +10,8 @@
     ///
     /// One line per sample, appended to TunnelOptions.memoryLogURL:
     ///   "<unix ms> <os_proc_available_memory bytes> <go-held bytes>"
-    /// Go-held is 0 for now: nexuscore exports no Go memory reading yet (see the TODO below).
+    /// Go-held is nexuscore.GoMemoryBytes (core/nexuscore/memory.go): what the Go runtime has
+    /// mapped minus what it has released, i.e. its share of the extension's footprint.
     ///
     /// Bounded: never more than `maxLines` (2 h at 1 Hz). When the file reaches it, the oldest
     /// lines are dropped down to `trimTo` in one rewrite, so the file is rewritten about every
@@ -58,9 +60,9 @@
             if lines >= Self.maxLines { trim() }
             let now = Int64(Date().timeIntervalSince1970 * 1000)
             let available = os_proc_available_memory()
-            // TODO(B-03): a nexuscore export of the Go runtime's held memory (for example
-            // runtime/metrics "/memory/classes/total:bytes" minus released), then log it here.
-            let goHeld = 0
+            // runtime/metrics read: cheap, no stop-the-world (memory.go). Once a second, never on
+            // the packet path.
+            let goHeld = NexuscoreGoMemoryBytes()
             let line = "\(now) \(available) \(goHeld)\n"
             do {
                 try handle?.write(contentsOf: Data(line.utf8))

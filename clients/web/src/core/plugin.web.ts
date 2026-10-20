@@ -123,6 +123,11 @@ export class NexusCoreWeb extends WebPlugin implements NexusCorePlugin {
     this.logs = [];
   }
 
+  /** iOS only; the browser stub has no device diagnostics. */
+  async exportDiagnostics(): Promise<void> {
+    throw this.unavailable('Diagnostics export is iOS only');
+  }
+
   /** No-op in the stub: the fake core writes into its ring unconditionally. */
   async setLogStreaming(_options: { enabled: boolean }): Promise<void> {}
 

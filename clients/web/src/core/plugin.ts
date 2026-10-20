@@ -339,6 +339,14 @@ export interface NexusCorePlugin {
   clearLogs(): Promise<void>;
 
   /**
+   * iOS only: open the share sheet with the diagnostics file for bench/B-03 stage 2 - the
+   * extension's memory samples (one line a second while a NEXUS_B03 build runs) and device and
+   * build facts. No log lines and no server details: it is meant to be sent to the developers
+   * after a short device session (ios-plan/DEVICE-SESSION.md). Android does not implement it.
+   */
+  exportDiagnostics(): Promise<void>;
+
+  /**
    * Open or close the core's log subscription.
    *
    * Call with true when a log screen mounts and false when it unmounts — never at app start.

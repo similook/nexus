@@ -91,7 +91,7 @@ jobs:
           go test -count=1 -tags "$TAGS,nexus_bench" -ldflags=-checklinkname=0 ./nexuscore/ -run '^TestB03Memory$' -v -timeout 0 2>&1 | tee "$RUNNER_TEMP/b03.log"
           cat "$B03_OUT/result.md" >> "$GITHUB_STEP_SUMMARY"
           # The result table, public as annotations (one per arm row).
-          grep '^| ' "$B03_OUT/result.md" | tail -n +3 | while read -r row; do echo "::notice title=B-03 host proxy::$row"; done
+          grep '^| ' "$B03_OUT/result.md" | tail -n +2 | while read -r row; do echo "::notice title=B-03 host proxy::$row"; done
       - uses: actions/upload-artifact@v4
         with:
           name: b03-macos
@@ -125,11 +125,18 @@ jobs:
           npm run build
       - name: XcodeGen
         run: brew install xcodegen
-      - name: Generate Nexus.xcodeproj, then sync Capacitor (rewrites CapApp-SPM/Package.swift)
+      # Order: cap copy first (App/public, capacitor.config.json and config.xml must exist when
+      # XcodeGen lists the app's resources), then XcodeGen, then cap sync (it reads the
+      # deployment target from App.xcodeproj and rewrites CapApp-SPM/Package.swift).
+      - name: Generate Nexus.xcodeproj and sync Capacitor
         working-directory: clients/web
         run: |
-          (cd ios/App && xcodegen generate)
-          npx cap sync ios
+          set -o pipefail
+          {
+            npx cap copy ios
+            (cd ios/App && xcodegen generate)
+            npx cap sync ios
+          } 2>&1 | tee "$RUNNER_TEMP/generate.log"
       - name: Build (unsigned)
         working-directory: clients/web/ios/App
         run: |
@@ -146,6 +153,11 @@ jobs:
       - name: Failure tail
         if: failure()
         run: |
+          g="$RUNNER_TEMP/generate.log"
+          if [ -f "$g" ] && [ ! -f "$RUNNER_TEMP/xcodebuild.log" ]; then
+            tail="$(tail -n 40 "$g" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=generate tail::${tail}"
+          fi
           f="$RUNNER_TEMP/xcodebuild.log"; [ -f "$f" ] || exit 0
           errs="$(grep -E 'error:' "$f" | sort -u | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
           echo "::error title=xcodebuild errors::${errs}"
