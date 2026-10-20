@@ -38,7 +38,9 @@ jobs:
 
       - name: Build Nexus.xcframework
         working-directory: core
-        run: ./scripts/build-apple.sh
+        run: |
+          set -o pipefail
+          ./scripts/build-apple.sh 2>&1 | tee "$RUNNER_TEMP/build-apple.log"
 
       - name: Framework report
         working-directory: core
@@ -62,8 +64,18 @@ jobs:
           B03_OUT: ${{ github.workspace }}/bench/runs/ci-B-03-macos
           B03_CYCLES: '3'
         run: |
-          go test -count=1 -tags "$TAGS,nexus_bench" -ldflags=-checklinkname=0 ./nexuscore/ -run '^TestB03Memory$' -v -timeout 0
+          set -o pipefail
+          go test -count=1 -tags "$TAGS,nexus_bench" -ldflags=-checklinkname=0 ./nexuscore/ -run '^TestB03Memory$' -v -timeout 0 2>&1 | tee "$RUNNER_TEMP/b03.log"
           cat "$B03_OUT/result.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # Logs need a signed-in viewer; the run summary does not. On failure, the tail goes there.
+      - name: Failure tail
+        if: failure()
+        run: |
+          for f in "$RUNNER_TEMP/build-apple.log" "$RUNNER_TEMP/b03.log"; do
+            [ -f "$f" ] || continue
+            { echo "## $(basename "$f") (last 80 lines)"; echo '```'; tail -n 80 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
