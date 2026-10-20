@@ -68,13 +68,16 @@ jobs:
           go test -count=1 -tags "$TAGS,nexus_bench" -ldflags=-checklinkname=0 ./nexuscore/ -run '^TestB03Memory$' -v -timeout 0 2>&1 | tee "$RUNNER_TEMP/b03.log"
           cat "$B03_OUT/result.md" >> "$GITHUB_STEP_SUMMARY"
 
-      # Logs need a signed-in viewer; the run summary does not. On failure, the tail goes there.
+      # Logs and summaries need a signed-in viewer; annotations do not (check-runs API). On
+      # failure the log tail goes into one error annotation, newlines escaped as %0A.
       - name: Failure tail
         if: failure()
         run: |
           for f in "$RUNNER_TEMP/build-apple.log" "$RUNNER_TEMP/b03.log"; do
             [ -f "$f" ] || continue
             { echo "## $(basename "$f") (last 80 lines)"; echo '```'; tail -n 80 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            tail="$(tail -n 60 "$f" | sed -e 's/%/%25/g' -e 's//%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=$(basename "$f") tail::${tail}"
           done
 
       - uses: actions/upload-artifact@v4
