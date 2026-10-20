@@ -21,6 +21,13 @@ import { endpointOf, isQuicProtocol, type ServerNode } from '../data/servers';
  * resume or visibility. dispose() cancels; NexusPlugin also cancels a probe when the app leaves
  * the foreground.
  *
+ * REALITY ML-KEM RETRY: a Delay that ends in "Handshake failed" for a server whose ML-KEM
+ * switch a check may still turn on (realityMlkem.ts, AUTOMATIC DETECTION) is not reported yet.
+ * When the run's probe ends, those servers are probed once more with the key share, as a second
+ * probe run inside the same Test All. A success lands as that server's Delay and turns the
+ * switch on; anything else lands as the original "Handshake failed". A server that passes
+ * without the share is recorded as not needing it.
+ *
  * Plain TypeScript with its bridge injected, so scripts/check-server-tests.mts can drive it;
  * useServerTests is the React wrapper.
  */
@@ -50,6 +57,14 @@ export interface ServerTestsBridge {
   onProbeDone(handler: (event: { runId: number; cancelled: boolean }) => void): () => void;
 }
 
+/** The REALITY ML-KEM retry's link to the switch (realityMlkem.ts), injected like the bridge. */
+export interface MlkemRetry {
+  /** The node with the key share when a failed handshake should be retried with it; null otherwise. */
+  variant(node: ServerNode): ServerNode | null;
+  /** A probe's verdict on the node as it is: true, it connects only with the share; false, without. */
+  verdict(node: ServerNode, needed: boolean): void;
+}
+
 /** Short, sanitized reason for a failed Delay, shown when the user taps it. */
 const REASONS: Partial<Record<ServerProbeStatus, string>> = {
   timeout: 'Timeout',
@@ -71,9 +86,12 @@ export function configFingerprint(config: string): string {
   return `${config.length.toString(36)}-${hash.toString(36)}`;
 }
 
-/** Unique for the process's life, so a run from before a WebView reload can never match. */
+/**
+ * Unique for the process's life, so a run from before a WebView reload can never match. Shared
+ * with Connect's ML-KEM check (realityMlkemCheck.ts), whose runs go through the same probe.
+ */
 let lastRunId = 0;
-function nextRunId(): number {
+export function nextRunId(): number {
   lastRunId = Math.max(Date.now(), lastRunId + 1);
   return lastRunId;
 }
@@ -93,6 +111,10 @@ interface Run {
   probePending: boolean;
   /** The core ended the probe early (the app left the foreground). */
   cancelled: boolean;
+  /** Handshake failures waiting for the ML-KEM retry: id -> the node with the share, and the failure to show if it fails too. */
+  retries: Map<string, { config: string; fingerprint: string; failed: DelayCell }>;
+  /** The retry's probe run, once it has started. */
+  retryRunId: number | null;
   total: number;
   delayOk: number;
   tcpOk: number;
@@ -115,6 +137,7 @@ export class ServerTestsController {
     private readonly currentNode: (id: string) => ServerNode | undefined,
     private readonly changed: () => void,
     private readonly finished: (summary: TestAllSummary) => void = () => {},
+    private readonly mlkem: MlkemRetry | null = null,
   ) {}
 
   /** Start listening. Idempotent. */
@@ -147,6 +170,8 @@ export class ServerTestsController {
       tcpPending: false,
       probePending: true,
       cancelled: false,
+      retries: new Map(),
+      retryRunId: null,
       total: 0,
       delayOk: 0,
       tcpOk: 0,
@@ -249,10 +274,15 @@ export class ServerTestsController {
 
   private onProbe(event: ServerProbeEvent): void {
     const run = this.run;
-    if (run === null || event.runId !== run.id || !run.awaiting.delete(event.serverId)) return;
-    this.progress = { done: run.total - run.awaiting.size, total: run.total };
-    if (run.delayWritable.delete(event.serverId)) {
-      let cell: DelayCell | undefined;
+    if (run === null) return;
+    if (run.retryRunId !== null && event.runId === run.retryRunId) {
+      this.onRetryProbe(run, event);
+      return;
+    }
+    if (event.runId !== run.id || !run.awaiting.delete(event.serverId)) return;
+    if (run.delayWritable.has(event.serverId)) {
+      // null: leave the cell as it is, because the ML-KEM retry answers for it.
+      let cell: DelayCell | undefined | null;
       if (!this.stillCurrent(run, event.serverId, event.fingerprint)) {
         cell = undefined; // edited or removed mid-run: the result is for a config that is gone
       } else if (event.status === 'cancelled') {
@@ -260,22 +290,102 @@ export class ServerTestsController {
       } else if (event.status === 'ok') {
         cell = { kind: 'ms', ms: event.delayMs };
         run.delayOk++;
+        this.verdict(event.serverId, false);
       } else {
-        cell = { kind: 'failed', reason: REASONS[event.status] ?? 'Failed' };
+        const failed: DelayCell = { kind: 'failed', reason: REASONS[event.status] ?? 'Failed' };
+        cell = event.status === 'handshake_failed' && this.queueRetry(run, event.serverId, failed) ? null : failed;
       }
-      this.patchDelay({ [event.serverId]: cell });
+      if (cell !== null) {
+        run.delayWritable.delete(event.serverId);
+        this.patchDelay({ [event.serverId]: cell });
+      }
     }
+    this.progress = { done: run.total - run.awaiting.size - run.retries.size, total: run.total };
     this.changed();
   }
 
   private onProbeDone(event: { runId: number; cancelled: boolean }): void {
     const run = this.run;
-    if (run === null || event.runId !== run.id) return;
+    if (run === null) return;
+    const retryDone = run.retryRunId !== null && event.runId === run.retryRunId;
+    if (!retryDone && event.runId !== run.id) return;
+    if (!retryDone && !event.cancelled && run.retries.size > 0) {
+      this.startRetries(run);
+      this.changed();
+      return;
+    }
     run.probePending = false;
     run.cancelled = event.cancelled;
+    this.settleRetries(run);
     this.restore(run, 'delay');
     this.finishIfDone(run);
     this.changed();
+  }
+
+  /** Hold a handshake failure for the ML-KEM retry. False when this server gets none. */
+  private queueRetry(run: Run, id: string, failed: DelayCell): boolean {
+    const node = this.currentNode(id);
+    const variant = node === undefined || this.mlkem === null ? null : this.mlkem.variant(node);
+    if (variant === null || variant.config === node?.config) return false;
+    run.retries.set(id, { config: variant.config, fingerprint: configFingerprint(variant.config), failed });
+    return true;
+  }
+
+  /** The second probe run of this Test All: every held server, with the key share. */
+  private startRetries(run: Run): void {
+    run.retryRunId = nextRunId();
+    const targets = [...run.retries].map(([id, retry]) => ({ id, fingerprint: retry.fingerprint, config: retry.config }));
+    this.bridge.probeServers({ runId: run.retryRunId, targets }).catch(() => {
+      if (this.run !== run) return;
+      run.probePending = false;
+      this.settleRetries(run);
+      this.restore(run, 'delay');
+      this.finishIfDone(run);
+      this.changed();
+    });
+  }
+
+  private onRetryProbe(run: Run, event: ServerProbeEvent): void {
+    const retry = run.retries.get(event.serverId);
+    if (retry === undefined || event.fingerprint !== retry.fingerprint) return;
+    run.retries.delete(event.serverId);
+    if (run.delayWritable.delete(event.serverId)) {
+      // Still the config the first probe tested? The retry's variant is derived from it.
+      const original = run.tested.get(event.serverId);
+      let cell: DelayCell | undefined;
+      if (original === undefined || !this.stillCurrent(run, event.serverId, original)) {
+        cell = undefined;
+      } else if (event.status === 'ok') {
+        cell = { kind: 'ms', ms: event.delayMs };
+        run.delayOk++;
+      } else if (event.status === 'cancelled') {
+        cell = run.previousDelay[event.serverId];
+      } else {
+        cell = retry.failed;
+      }
+      this.patchDelay({ [event.serverId]: cell });
+      // After the cell: the verdict rebuilds the node with the share, which changes its config.
+      if (cell !== undefined && event.status === 'ok') this.verdict(event.serverId, true);
+    }
+    this.progress = { done: run.total - run.awaiting.size - run.retries.size, total: run.total };
+    this.changed();
+  }
+
+  /** Retries that never got an answer: the server's own first result stands. */
+  private settleRetries(run: Run): void {
+    const changes: Record<string, DelayCell | undefined> = {};
+    for (const [id, retry] of run.retries) {
+      if (!run.delayWritable.delete(id)) continue;
+      const original = run.tested.get(id);
+      changes[id] = original !== undefined && this.stillCurrent(run, id, original) ? retry.failed : undefined;
+    }
+    run.retries.clear();
+    this.patchDelay(changes);
+  }
+
+  private verdict(id: string, needed: boolean): void {
+    const node = this.currentNode(id);
+    if (node !== undefined && this.mlkem !== null) this.mlkem.verdict(node, needed);
   }
 
   /** Same server, same config as when the run started. */
@@ -296,7 +406,7 @@ export class ServerTestsController {
     if (run === null) return;
     this.run = null;
     this.progress = null;
-    void this.bridge.cancelProbe({ runId: run.id }).catch(() => {});
+    void this.bridge.cancelProbe({ runId: run.retryRunId ?? run.id }).catch(() => {});
     if (restoreCells) {
       this.restore(run, 'tcp');
       this.restore(run, 'delay');

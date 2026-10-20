@@ -2,12 +2,20 @@ import { useCallback, useRef, useState } from 'react';
 import {
   applyRealityMlkem,
   carryRealityMlkem,
+  carryRealityMlkemOrigin,
   loadRealityMlkem,
+  loadRealityMlkemOrigins,
+  realityMlkemCheckable,
   realityMlkemKey,
   realityMlkemState,
+  realityMlkemUnchecked,
   rebuildWithRealityMlkem,
   saveRealityMlkem,
+  saveRealityMlkemOrigins,
   withRealityMlkem,
+  withRealityMlkemUserChoice,
+  withRealityMlkemVerdict,
+  type RealityMlkemOrigin,
   type RealityMlkemState,
 } from './realityMlkem';
 import {
@@ -165,6 +173,19 @@ export interface UseSubscriptions {
    * no switch: not REALITY, or its link already opts in.
    */
   setRealityMlkem: (node: ServerNode, on: boolean) => boolean;
+  /**
+   * May an automatic check turn this node's switch on (realityMlkem.ts, AUTOMATIC DETECTION)?
+   * REALITY, OFF, not opted in by its link, never set by the user.
+   */
+  realityMlkemCheckable: (node: ServerNode) => boolean;
+  /** Checkable and never checked: Connect checks it before starting. */
+  realityMlkemUnchecked: (node: ServerNode) => boolean;
+  /**
+   * Record a check's verdict - true: the server needs the key share - and return the node as
+   * Connect must now run it: rebuilt with the share when it is needed, unchanged otherwise.
+   * Every node of the same server follows, as with the user's switch.
+   */
+  applyRealityMlkemVerdict: (node: ServerNode, needed: boolean) => ServerNode;
 }
 
 export function useSubscriptions(): UseSubscriptions {
@@ -192,6 +213,14 @@ export function useSubscriptions(): UseSubscriptions {
     mlkemRef.current = next;
     saveRealityMlkem(next);
     setMlkemKeys(next);
+  }, []);
+  // Who set each switch: the user, or an automatic check. Kept beside the set, never in it.
+  const [mlkemOrigins, setMlkemOrigins] = useState<ReadonlyMap<string, RealityMlkemOrigin>>(loadRealityMlkemOrigins);
+  const originsRef = useRef(mlkemOrigins);
+  const commitOrigins = useCallback((next: ReadonlyMap<string, RealityMlkemOrigin>) => {
+    originsRef.current = next;
+    saveRealityMlkemOrigins(next);
+    setMlkemOrigins(next);
   }, []);
 
   /*
@@ -321,6 +350,8 @@ export function useSubscriptions(): UseSubscriptions {
     if (original !== undefined) {
       const carried = carryRealityMlkem(mlkemRef.current, original, updated);
       if (carried !== mlkemRef.current) commitMlkem(carried);
+      const carriedOrigin = carryRealityMlkemOrigin(originsRef.current, original, updated);
+      if (carriedOrigin !== originsRef.current) commitOrigins(carriedOrigin);
     }
     const stored = applyRealityMlkem(updated, mlkemRef.current);
 
@@ -344,12 +375,33 @@ export function useSubscriptions(): UseSubscriptions {
       return next;
     });
     return stored;
-  }, [subscriptions, manualNodes, commitMlkem]);
+  }, [subscriptions, manualNodes, commitMlkem, commitOrigins]);
 
   const realityMlkem = useCallback(
-    (node: ServerNode) => realityMlkemState(node, mlkemKeys),
-    [mlkemKeys],
+    (node: ServerNode) => realityMlkemState(node, mlkemKeys, mlkemOrigins),
+    [mlkemKeys, mlkemOrigins],
   );
+
+  // Every node of this server, not only the one in hand: the same server and user can sit in
+  // two subscriptions, and all of them must run the config the switch now describes.
+  const rebuildServer = useCallback((key: string, keys: ReadonlySet<string>) => {
+    const rebuild = (n: ServerNode) =>
+      n.uri !== undefined && realityMlkemKey(n.uri) === key ? rebuildWithRealityMlkem(n, keys) : n;
+    setSubscriptions((prev) => {
+      const updated = prev.map((r) => ({ ...r, nodes: r.nodes.map(rebuild) }));
+      save(updated);
+      return updated;
+    });
+    setManualNodes((prev) => {
+      const updated = prev.map(rebuild);
+      try {
+        localStorage.setItem(MANUAL_KEY, JSON.stringify(updated));
+      } catch {
+        // Non-fatal; see save().
+      }
+      return updated;
+    });
+  }, []);
 
   const setRealityMlkem = useCallback(
     (node: ServerNode, on: boolean): boolean => {
@@ -357,28 +409,36 @@ export function useSubscriptions(): UseSubscriptions {
       const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
       if (next === null || key === null) return false;
       commitMlkem(next);
-
-      // Every node of this server, not only the one tapped: the same server and user can sit
-      // in two subscriptions, and all of them must run the config the switch now describes.
-      const rebuild = (n: ServerNode) =>
-        n.uri !== undefined && realityMlkemKey(n.uri) === key ? rebuildWithRealityMlkem(n, next) : n;
-      setSubscriptions((prev) => {
-        const updated = prev.map((r) => ({ ...r, nodes: r.nodes.map(rebuild) }));
-        save(updated);
-        return updated;
-      });
-      setManualNodes((prev) => {
-        const updated = prev.map(rebuild);
-        try {
-          localStorage.setItem(MANUAL_KEY, JSON.stringify(updated));
-        } catch {
-          // Non-fatal; see save().
-        }
-        return updated;
-      });
+      // The user's own choice: no automatic check changes this server again.
+      commitOrigins(withRealityMlkemUserChoice(originsRef.current, node));
+      rebuildServer(key, next);
       return true;
     },
-    [commitMlkem],
+    [commitMlkem, commitOrigins, rebuildServer],
+  );
+
+  const realityMlkemCheckableFor = useCallback(
+    (node: ServerNode) => realityMlkemCheckable(node, mlkemRef.current, originsRef.current),
+    [],
+  );
+
+  const realityMlkemUncheckedFor = useCallback(
+    (node: ServerNode) => realityMlkemUnchecked(node, mlkemRef.current, originsRef.current),
+    [],
+  );
+
+  const applyRealityMlkemVerdict = useCallback(
+    (node: ServerNode, needed: boolean): ServerNode => {
+      const next = withRealityMlkemVerdict(mlkemRef.current, originsRef.current, node, needed);
+      const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+      if (next === null || key === null) return node;
+      commitOrigins(next.origins);
+      if (!needed) return node;
+      commitMlkem(next.keys);
+      rebuildServer(key, next.keys);
+      return rebuildWithRealityMlkem(node, next.keys);
+    },
+    [commitMlkem, commitOrigins, rebuildServer],
   );
 
   const removeManual = useCallback((id: string) => {
@@ -407,6 +467,9 @@ export function useSubscriptions(): UseSubscriptions {
     replaceNode,
     realityMlkem,
     setRealityMlkem,
+    realityMlkemCheckable: realityMlkemCheckableFor,
+    realityMlkemUnchecked: realityMlkemUncheckedFor,
+    applyRealityMlkemVerdict,
     refresh,
     remove,
     removeManual,

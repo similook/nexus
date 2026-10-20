@@ -2,7 +2,8 @@ import { realityOfUri, rebuildNodeConfig } from './subscription';
 import type { ServerNode } from '../data/servers';
 
 /**
- * The per-node REALITY ML-KEM switch. OFF for every node unless the user turns it on.
+ * The per-node REALITY ML-KEM switch. OFF for every node unless the user turns it on, or a
+ * check finds the server refuses to connect without it (AUTOMATIC DETECTION, at the end).
  *
  * WHY A SWITCH AND NOT THE LINK
  *
@@ -40,7 +41,8 @@ import type { ServerNode } from '../data/servers';
 // its keys can never match again and are left unread.
 const STORAGE_KEY = 'nexus.realityMlkem.v2';
 
-export type RealityMlkemState = 'unsupported' | 'link' | 'off' | 'on';
+/** 'auto': ON because a check found the server needs it (see AUTOMATIC DETECTION below). */
+export type RealityMlkemState = 'unsupported' | 'link' | 'off' | 'on' | 'auto';
 
 /** The node's switch key: two independent 32-bit hashes of its REALITY identity. Null when not REALITY. */
 export function realityMlkemKey(uri: string): string | null {
@@ -81,11 +83,17 @@ function switchedOn(node: ServerNode, keys: ReadonlySet<string>): boolean {
   return key !== null && keys.has(key);
 }
 
-export function realityMlkemState(node: ServerNode, keys: ReadonlySet<string>): RealityMlkemState {
+export function realityMlkemState(
+  node: ServerNode,
+  keys: ReadonlySet<string>,
+  origins: ReadonlyMap<string, RealityMlkemOrigin> = NO_ORIGINS,
+): RealityMlkemState {
   const reality = node.uri === undefined ? null : realityOfUri(node.uri);
   if (reality === null) return 'unsupported';
   if (reality.optIn) return 'link';
-  return switchedOn(node, keys) ? 'on' : 'off';
+  if (!switchedOn(node, keys)) return 'off';
+  const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+  return key !== null && origins.get(key) === 'auto-on' ? 'auto' : 'on';
 }
 
 /**
@@ -135,4 +143,143 @@ export function carryRealityMlkem(
   const key = updated.uri === undefined ? null : realityMlkemKey(updated.uri);
   if (!switchedOn(original, keys) || key === null || keys.has(key)) return keys;
   return new Set(keys).add(key);
+}
+
+// ---------------------------------------------------------------------------------------
+// AUTOMATIC DETECTION
+// ---------------------------------------------------------------------------------------
+//
+// Measured against real Xray servers (core/nexuscore/vless_encryption_matrix_test.go): a
+// v26.9.8+ REALITY server rejects every hello without the X25519MLKEM768 key share
+// ("authentication failed"), and an older server accepts it either way. So turning the share
+// on can only help - but the user chose to keep it OFF until a server shows it needs it.
+//
+// A server shows it when a probe of its config without the share ends in "Handshake failed"
+// and a probe of the same config with it succeeds. Two places run that check: Test All
+// (serverTests.ts retries such a failure with the share) and the first Connect to a server no
+// check has looked at yet (realityMlkemCheck.ts). A positive verdict turns the switch on
+// through the same key set as the user's switch, so everything that already reads it - the
+// config Connect starts, the Delay probe, a refresh, the tile's replay of the last config -
+// follows with no change.
+//
+// Who set the switch is kept beside it, keyed the same way:
+//   absent      nobody yet. OFF; the next check may decide.
+//   'auto-on'   a check found the server needs the share. ON, shown as "turned on automatically".
+//   'auto-off'  a check found the server accepts a hello without it. OFF; a later Test All that
+//               sees "Handshake failed" may still turn it on (the server was upgraded).
+//   'user'      the user flipped the switch. Never changed by a check again.
+
+export type RealityMlkemOrigin = 'auto-on' | 'auto-off' | 'user';
+
+const ORIGINS_KEY = 'nexus.realityMlkem.origin.v1';
+const NO_ORIGINS: ReadonlyMap<string, RealityMlkemOrigin> = new Map();
+
+export function loadRealityMlkemOrigins(): Map<string, RealityMlkemOrigin> {
+  try {
+    const raw = localStorage.getItem(ORIGINS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    const origins = new Map<string, RealityMlkemOrigin>();
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [key, value] of Object.entries(parsed)) {
+        if (value === 'auto-on' || value === 'auto-off' || value === 'user') origins.set(key, value);
+      }
+    }
+    return origins;
+  } catch {
+    // Unreadable: no node has been checked. The switch set itself is untouched.
+    return new Map();
+  }
+}
+
+export function saveRealityMlkemOrigins(origins: ReadonlyMap<string, RealityMlkemOrigin>): void {
+  try {
+    localStorage.setItem(ORIGINS_KEY, JSON.stringify(Object.fromEntries(origins)));
+  } catch {
+    // Non-fatal; the in-memory map still holds for this session.
+  }
+}
+
+/**
+ * May a check turn this node's switch on? REALITY with a key, not opted in by its link, OFF,
+ * and never set by the user.
+ */
+export function realityMlkemCheckable(
+  node: ServerNode,
+  keys: ReadonlySet<string>,
+  origins: ReadonlyMap<string, RealityMlkemOrigin>,
+): boolean {
+  if (realityMlkemState(node, keys) !== 'off') return false;
+  const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+  return key !== null && origins.get(key) !== 'user';
+}
+
+/** Checkable and never checked: Connect looks at it before starting. */
+export function realityMlkemUnchecked(
+  node: ServerNode,
+  keys: ReadonlySet<string>,
+  origins: ReadonlyMap<string, RealityMlkemOrigin>,
+): boolean {
+  const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+  return key !== null && realityMlkemCheckable(node, keys, origins) && !origins.has(key);
+}
+
+/** The node with the share offered: what a check probes beside the node as it is. */
+export function realityMlkemVariant(node: ServerNode): ServerNode {
+  return rebuildNodeConfig(node, true);
+}
+
+/**
+ * What two probes of one server say. `without` is the node as it is; `withShare` the same node
+ * with the key share (null when it was not probed). True: the server needs the share. False: it
+ * accepts the node without it. Null: no verdict - the server failed for some other reason
+ * (down, wrong credentials, blocked), and the switch is left alone.
+ */
+export function realityMlkemVerdict(without: string, withShare: string | null): boolean | null {
+  if (without === 'ok') return false;
+  if (without === 'handshake_failed' && withShare === 'ok') return true;
+  return null;
+}
+
+/**
+ * The switch set and origins with a check's verdict applied, or null when nothing changes:
+ * the node is not checkable, or it already holds that verdict.
+ */
+export function withRealityMlkemVerdict(
+  keys: ReadonlySet<string>,
+  origins: ReadonlyMap<string, RealityMlkemOrigin>,
+  node: ServerNode,
+  needed: boolean,
+): { keys: Set<string>; origins: Map<string, RealityMlkemOrigin> } | null {
+  const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+  if (key === null || !realityMlkemCheckable(node, keys, origins)) return null;
+  if (!needed && origins.get(key) === 'auto-off') return null;
+  const nextKeys = new Set(keys);
+  const nextOrigins = new Map(origins);
+  if (needed) nextKeys.add(key);
+  nextOrigins.set(key, needed ? 'auto-on' : 'auto-off');
+  return { keys: nextKeys, origins: nextOrigins };
+}
+
+/** The origins with the user's own choice recorded for this node: no check touches it again. */
+export function withRealityMlkemUserChoice(
+  origins: ReadonlyMap<string, RealityMlkemOrigin>,
+  node: ServerNode,
+): Map<string, RealityMlkemOrigin> {
+  const next = new Map(origins);
+  const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+  if (key !== null) next.set(key, 'user');
+  return next;
+}
+
+/** carryRealityMlkem for the origins: an edit that changes the identity keeps who set it. */
+export function carryRealityMlkemOrigin(
+  origins: ReadonlyMap<string, RealityMlkemOrigin>,
+  original: ServerNode,
+  updated: ServerNode,
+): ReadonlyMap<string, RealityMlkemOrigin> {
+  const from = original.uri === undefined ? null : realityMlkemKey(original.uri);
+  const to = updated.uri === undefined ? null : realityMlkemKey(updated.uri);
+  const origin = from === null ? undefined : origins.get(from);
+  if (origin === undefined || to === null || to === from || origins.has(to)) return origins;
+  return new Map(origins).set(to, origin);
 }

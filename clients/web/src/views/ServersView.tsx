@@ -12,6 +12,7 @@ import { formatQuota } from '../core/format';
 import { coreEvents } from '../core/coreEvents';
 import { NexusCore } from '../core/plugin';
 import { useServerTests, type DelayCell, type TcpCell, type TestAllSummary } from '../core/useServerTests';
+import { realityMlkemVariant } from '../core/realityMlkem';
 
 export function ServersView({
   selectedId,
@@ -34,9 +35,18 @@ export function ServersView({
    * moment on one network; storing it would leave a stale number sitting next to a node the
    * user is choosing between, which is worse than "--".
    */
-  const tests = useServerTests(subs.nodes, (summary: TestAllSummary) => {
-    if (!summary.cancelled) toast(`${summary.delayOk} of ${summary.delayTotal} working`);
-  });
+  const tests = useServerTests(
+    subs.nodes,
+    (summary: TestAllSummary) => {
+      if (!summary.cancelled) toast(`${summary.delayOk} of ${summary.delayTotal} working`);
+    },
+    // A REALITY server that fails its handshake is retried with the ML-KEM key share, and the
+    // switch turns on when that is what it takes (realityMlkem.ts, AUTOMATIC DETECTION).
+    {
+      variant: (node) => (subs.realityMlkemCheckable(node) ? realityMlkemVariant(node) : null),
+      verdict: (node, needed) => void subs.applyRealityMlkemVerdict(node, needed),
+    },
+  );
 
   /** Which node the details/edit/share sheet is showing, and on which tab. */
   const [sheet, setSheet] = useState<{ node: ServerNode; tab: NodeSheetTab } | null>(null);

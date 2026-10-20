@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNexus } from '../core/NexusProvider';
 import { formatSpeedMB, formatTotal, formatUptime } from '../core/format';
 import { isQuicProtocol, type ServerNode } from '../data/servers';
@@ -59,7 +59,16 @@ function probeTargetFor(running: RunningServer): ServerNode {
   };
 }
 
-export function HomeView({ node }: { node: ServerNode | null }) {
+export function HomeView({
+  node,
+  prepare,
+}: {
+  node: ServerNode | null;
+  /** The node as Connect must start it - App's prepareConnect (the REALITY ML-KEM check). */
+  prepare?: (node: ServerNode) => Promise<ServerNode>;
+}) {
+  // While prepare() looks at a REALITY server before its first Connect.
+  const [checking, setChecking] = useState(false);
   // Push-driven, no timer. Describes the PHONE's link, never the tunnel - see plugin.ts.
   const network = useNetworkStatus();
   const {
@@ -122,12 +131,14 @@ export function HomeView({ node }: { node: ServerNode | null }) {
   // The button used to be disabled during a connect, so its label only had to describe a
   // state. It is tappable now and performs an abort, so the label has to describe the ACTION -
   // a button that says CONNECTING reads as "wait", which is the opposite of what it does.
-  const label = isConnected ? 'DISCONNECT' : isBusy ? 'CANCEL' : 'CONNECT';
+  const label = isConnected ? 'DISCONNECT' : isBusy ? 'CANCEL' : checking ? 'CHECKING' : 'CONNECT';
 
   const title = isConnected
     ? 'Connected'
     : isBusy
       ? 'Establishing tunnel… (tap to cancel)'
+      : checking
+        ? 'Checking the server…'
       : connection === 'error'
         ? 'Connection failed'
         : 'Disconnected';
@@ -245,7 +256,24 @@ export function HomeView({ node }: { node: ServerNode | null }) {
               // one in the background. Both are no-ops in every other build. A stop from the
               // notification or the tile never comes through here, so it never shows an ad.
               const disconnecting = isConnected;
-              void toggle(node.config, node.name).then(disconnecting ? adAfterDisconnect : prepareAd);
+              if (disconnecting || isBusy || prepare === undefined) {
+                void toggle(node.config, node.name).then(disconnecting ? adAfterDisconnect : prepareAd);
+                return;
+              }
+              // A connect: first the REALITY ML-KEM check (once per server, App's
+              // prepareConnect), then the node exactly as it says to start it. A second tap
+              // while it runs is ignored rather than starting a second check.
+              if (checking) return;
+              setChecking(true);
+              void prepare(node)
+                .then((ready) => {
+                  setChecking(false);
+                  return toggle(ready.config, ready.name);
+                }, () => {
+                  setChecking(false);
+                  return toggle(node.config, node.name);
+                })
+                .then(prepareAd);
             }}
             // NOT disabled while connecting.
             //
