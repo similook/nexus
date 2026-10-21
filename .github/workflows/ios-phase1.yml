@@ -156,6 +156,7 @@ jobs:
       # Signed to run locally ("-"): the Simulator then applies the entitlements, including the
       # App Group that Shared/AppGroup.swift requires.
       - name: Build for the Simulator (Debug)
+        id: simbuild
         working-directory: clients/web/ios/App
         run: |
           set -o pipefail
@@ -169,6 +170,7 @@ jobs:
           app="$RUNNER_TEMP/dd-sim/Build/Products/Debug-iphonesimulator/App.app"
           udid=$(xcrun simctl list devices available | grep -E '^ +iPhone' | head -1 | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
           echo "simulator: $(xcrun simctl list devices available | grep "$udid" | sed 's/^ *//')"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b > /dev/null
           xcrun simctl install "$udid" "$app"
@@ -202,7 +204,7 @@ jobs:
           grep -aiE 'error|fault|fatal|crash|terminat|exception|assert|dyld|nexus' "$out/unified.log" | grep -v 'To Native' > "$out/unified-short.log" || true
           note "Unified log (App)" "$out/unified-short.log" 40
           crashes=""
-          for report in $(find ~/Library/Logs/DiagnosticReports -name '*.ips' -newer "$out/launched" 2>/dev/null); do
+          for report in $(find ~/Library/Logs/DiagnosticReports \( -name 'App-*.ips' -o -name 'PacketTunnel-*.ips' \) -newer "$out/launched" 2>/dev/null); do
             crashes="$crashes $(basename "$report")"
             cp "$report" "$out/"
             python3 .github/scripts/ips-summary.py "$report" > "$out/crash.txt" 2>&1 || true
@@ -214,6 +216,20 @@ jobs:
             exit 1
           fi
           echo "::notice title=Simulator launch::running 30 s after launch, no crash report"
+      # Tests/ (the NexusTests target): the router, DNSServiceGetAddrInfo, NWConnection TCP ping
+      # on loopback, the app-message format. Runs whenever the Simulator build did, even if the
+      # launch test failed.
+      - name: Unit tests (Simulator)
+        if: ${{ !cancelled() && steps.simbuild.outcome == 'success' }}
+        working-directory: clients/web/ios/App
+        run: |
+          set -o pipefail
+          xcodebuild test -project Nexus.xcodeproj -scheme App -configuration Debug \
+            -destination "id=$SIM_UDID" -derivedDataPath "$RUNNER_TEMP/dd-sim" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee "$RUNNER_TEMP/sim-test.log" | grep -E 'error:|Test Case .*(passed|failed)|\*\* TEST' | head -200
+          summary="$(grep -E 'Test Case .*(passed|failed)|Executed [0-9]+ test' "$RUNNER_TEMP/sim-test.log" | sed -e 's/^.*Test Case //' | tail -n 40 | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          echo "::notice title=Unit tests::${summary}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -229,11 +245,11 @@ jobs:
             tail="$(tail -n 40 "$g" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
             echo "::error title=generate tail::${tail}"
           fi
-          for f in "$RUNNER_TEMP/xcodebuild.log" "$RUNNER_TEMP/sim-build.log"; do
+          for f in "$RUNNER_TEMP/xcodebuild.log" "$RUNNER_TEMP/sim-build.log" "$RUNNER_TEMP/sim-test.log"; do
             [ -f "$f" ] || continue
-            grep -q 'BUILD SUCCEEDED' "$f" && continue
+            grep -qE 'BUILD SUCCEEDED|TEST SUCCEEDED' "$f" && continue
             name=$(basename "$f" .log)
-            errs="$(grep -E 'error:' "$f" | sort -u | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            errs="$(grep -E 'error:|failed' "$f" | sort -u | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
             echo "::error title=${name} errors::${errs}"
             tail="$(tail -n 40 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
             echo "::error title=${name} tail::${tail}"

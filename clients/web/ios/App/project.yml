@@ -9,6 +9,7 @@
 #
 #   App           Capacitor WebView UI (clients/web) + the NexusCore plugin (Plugin/)
 #   PacketTunnel  NEPacketTunnelProvider running the core (PacketTunnel/), ~50 MB ceiling
+#   NexusTests    unit tests of the app's own Swift (Tests/), hosted by App, Simulator only
 #
 # Both link the gomobile Nexus.xcframework (core/scripts/build-apple.sh). It is a static
 # framework, so each binary links its own copy and nothing is embedded.
@@ -40,7 +41,9 @@ targets:
   App:
     type: application
     platform: iOS
-    scheme: {}
+    scheme:
+      testTargets:
+        - NexusTests
     sources:
       - path: App
         excludes:
@@ -92,3 +95,19 @@ targets:
       - framework: ../../../../core/build/apple/Nexus.xcframework
         embed: false
       - sdk: NetworkExtension.framework
+
+  NexusTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      # Hosted by App and loaded into it: App's symbols, Go runtime included, come from there.
+      # Linking Nexus.xcframework here too would put a second static Go runtime in one process.
+      - target: App
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.nexus.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/App.app/App"
+        BUNDLE_LOADER: "$(TEST_HOST)"
