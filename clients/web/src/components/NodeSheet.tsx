@@ -153,7 +153,7 @@ export function NodeSheet({
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-8 custom-scroll">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 custom-scroll" style={{ paddingBottom: 'max(2rem, env(safe-area-inset-bottom))' }}>
           {tab === 'details' && (
             <dl className="space-y-1.5">
               {rows.map((row) => (
@@ -319,6 +319,8 @@ function Field({
         value={value}
         inputMode={inputMode}
         autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
         spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
         className="w-full px-3.5 py-2.5 rounded-xl bg-brand-navy border border-brand-border text-sm text-white font-mono focus:outline-none focus:border-brand-orange"

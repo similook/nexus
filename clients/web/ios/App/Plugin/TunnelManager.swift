@@ -70,6 +70,51 @@ final class TunnelManager {
         manager?.connection.stopVPNTunnel()
     }
 
+    /// One request to the running extension (Shared/AppMessage.swift). Fails when no tunnel
+    /// session exists or the extension does not answer; the completion runs on an arbitrary
+    /// queue.
+    func send(_ message: AppMessage, completion: @escaping (Error?) -> Void) {
+        guard let session = manager?.connection as? NETunnelProviderSession,
+              session.status != .invalid, session.status != .disconnected
+        else {
+            completion(TunnelError("the tunnel is not running"))
+            return
+        }
+        do {
+            try session.sendProviderMessage(JSONEncoder().encode(message)) { data in
+                guard let data, let reply = try? JSONDecoder().decode(AppMessage.Reply.self, from: data) else {
+                    completion(TunnelError("the tunnel did not answer"))
+                    return
+                }
+                completion(reply.error.map { TunnelError($0) })
+            }
+        } catch {
+            completion(error)
+        }
+    }
+
+    /// Waits until the system reports the tunnel down (or `timeout` passes), then calls back on
+    /// the main queue. NEVPNStatusDidChange drives it, no polling.
+    func whenStopped(timeout: TimeInterval, _ completion: @escaping () -> Void) {
+        guard serviceState != "stopped" else {
+            DispatchQueue.main.async(execute: completion)
+            return
+        }
+        var observer: NSObjectProtocol?
+        var finished = false
+        let finish = {
+            guard !finished else { return }
+            finished = true
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            completion()
+        }
+        observer = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: nil, queue: .main) {
+            [weak self] _ in
+            if self?.serviceState ?? "stopped" == "stopped" { finish() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: finish)
+    }
+
     /// Our manager, enabled and saved. iOS requires a reload after the first save before a
     /// start succeeds ("configuration is stale"), hence the load after save.
     private func withSavedManager(_ completion: @escaping (Result<NETunnelProviderManager, Error>) -> Void) {
@@ -112,4 +157,11 @@ final class TunnelManager {
             "protocol": (proxy["type"] as? String) ?? NSNull(),
         ]
     }
+}
+
+/// A failure with a message the UI may show as is. Never carries an address or a config.
+struct TunnelError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
 }

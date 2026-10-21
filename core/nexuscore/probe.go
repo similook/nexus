@@ -115,6 +115,21 @@ var (
 //
 // workers <= 0 and timeoutMillis <= 0 select the defaults (6 workers, 6 s per server).
 func ProbeServers(runID int64, targetsJSON string, workers int32, timeoutMillis int32, resolver HostResolver, handler ProbeHandler) error {
+	return startProbe(runID, targetsJSON, workers, timeoutMillis, "", resolver, handler)
+}
+
+// ProbeServersBound is ProbeServers with every probe's connections bound to the network
+// interface bindInterface (its name, e.g. "en0"). For iOS: there the app's own sockets go INTO
+// its tunnel while it is up, where Android puts the app on its VPN's deny list. A probe that
+// should measure the server from the physical network names that network's interface, the
+// same bind_interface (IP_BOUND_IF) binding desktop/ipc/probe.go uses for Test All on a
+// system-wide TUN. The resolver must then answer from that network too, not the tunnel's DNS.
+// "" binds nothing and is exactly ProbeServers.
+func ProbeServersBound(runID int64, targetsJSON string, workers int32, timeoutMillis int32, bindInterface string, resolver HostResolver, handler ProbeHandler) error {
+	return startProbe(runID, targetsJSON, workers, timeoutMillis, bindInterface, resolver, handler)
+}
+
+func startProbe(runID int64, targetsJSON string, workers int32, timeoutMillis int32, bindInterface string, resolver HostResolver, handler ProbeHandler) error {
 	if resolver == nil || handler == nil {
 		return errors.New("nexuscore: probe needs a resolver and a handler")
 	}
@@ -150,9 +165,10 @@ func ProbeServers(runID int64, targetsJSON string, workers int32, timeoutMillis 
 			handler.OnResult(runID, result.id, result.fingerprint, result.status, result.delayMs)
 		}
 		runProbe(ctx, targets, probeOptions{
-			workers: int(workers),
-			timeout: time.Duration(timeoutMillis) * time.Millisecond,
-			resolve: resolver.Resolve,
+			workers:       int(workers),
+			timeout:       time.Duration(timeoutMillis) * time.Millisecond,
+			resolve:       resolver.Resolve,
+			bindInterface: bindInterface,
 		}, emit)
 
 		probeAccess.Lock()
@@ -181,9 +197,10 @@ func CancelProbe(runID int64) {
 }
 
 type probeOptions struct {
-	workers int
-	timeout time.Duration
-	resolve func(host string) string
+	workers       int
+	timeout       time.Duration
+	resolve       func(host string) string
+	bindInterface string // "" = OS routing; see ProbeServersBound
 
 	// Test seams. Production leaves all of them zero.
 	link     string                                      // "" = urltest's default, the same URL Live tests
@@ -363,6 +380,7 @@ func (r *probeRunner) measure(ctx context.Context, index int, target probeTarget
 	}
 	tag := fmt.Sprintf("probe-%d", index)
 	fields["tag"] = mustRaw(tag)
+	probeBind(fields, r.options.bindInterface)
 
 	if addr, err := netip.ParseAddr(server); err == nil {
 		// An IP literal is never looked up; it still has to be a public address.
@@ -499,6 +517,16 @@ func probeOutbound(config string) (map[string]json.RawMessage, string, error) {
 	return nil, "", errProbeConfig
 }
 
+// probeBind sets bind_interface on a probe outbound's fields (ProbeServersBound); "" leaves
+// them as they are. sing-box's dialer then binds every connection of that outbound to the
+// interface (IP_BOUND_IF on Apple), except to loopback and multicast addresses, which sing
+// treats as virtual and never binds.
+func probeBind(fields map[string]json.RawMessage, iface string) {
+	if iface != "" {
+		fields["bind_interface"] = mustRaw(iface)
+	}
+}
+
 func mustRaw(value any) json.RawMessage {
 	content, err := json.Marshal(value)
 	if err != nil {
@@ -515,6 +543,13 @@ func probeParseAnswers(answers string, usable func(netip.Addr) bool) []netip.Add
 			continue
 		}
 		addr = addr.Unmap()
+		// An answer from the fakeip block came from a tunnel's DNS, not a resolver - on iOS the
+		// app's own lookups go into its VPN. Probing it would relay through the ACTIVE server
+		// and could show a dead server as working. Only answers: an IP-literal server follows
+		// ConfigGuard's policy alone (probeUsableAddress).
+		if probeFakeIPRange.Contains(addr) {
+			continue
+		}
 		if usable(addr) {
 			addrs = append(addrs, addr)
 		}
@@ -523,6 +558,9 @@ func probeParseAnswers(answers string, usable func(netip.Addr) bool) []netip.Add
 }
 
 var probeSiteLocalV6 = netip.MustParsePrefix("fec0::/10")
+
+// probeFakeIPRange is singboxConfig.ts's fakeip block (dns-fake inet4_range).
+var probeFakeIPRange = netip.MustParsePrefix("198.18.0.0/15")
 
 // probeUsableAddress is ConfigGuard.unusableReason, inverted: loopback, wildcard, link-local,
 // multicast and private answers are what an intercepting resolver returns, never a server

@@ -26,7 +26,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         role="status"
         aria-live="polite"
-        className={`absolute bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-brand-surface-card
+        style={{ bottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))' }}
+        className={`absolute left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-brand-surface-card
           border border-brand-orange/60 text-xs font-semibold text-white shadow-glow-orange-sm
           pointer-events-none transition-opacity duration-300 z-50 flex items-center gap-2
           ${toast ? 'opacity-100' : 'opacity-0'}`}

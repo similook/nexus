@@ -73,7 +73,8 @@ export function AddSubscriptionDialog({
       onClick={onClose}
     >
       <div
-        className="w-full rounded-t-3xl bg-brand-surface border-t border-x border-brand-border p-5 pb-8 space-y-4"
+        className="w-full rounded-t-3xl bg-brand-surface border-t border-x border-brand-border p-5 space-y-4"
+        style={{ paddingBottom: 'max(2rem, calc(1rem + env(safe-area-inset-bottom)))' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -113,6 +114,8 @@ export function AddSubscriptionDialog({
             onChange={(e) => setText(e.target.value)}
             rows={4}
             autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
             spellCheck={false}
             placeholder={'https://example.com/sub\nvless://…\nvmess://…'}
             className="w-full px-3.5 py-2.5 rounded-xl bg-brand-navy border border-brand-border text-sm text-white font-mono placeholder:text-brand-muted/60 focus:outline-none focus:border-brand-orange resize-none"

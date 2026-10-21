@@ -41,6 +41,9 @@ const config: CapacitorConfig = {
     ),
   },
   ios: {
+    // The WKWebView's own background until the page paints: index.html's theme-color, so a
+    // launch shows no white flash.
+    backgroundColor: '#070D18',
     // Never AdMob on iOS, whatever the build sets: App Review 5.4 bars a VPN app from sharing
     // user data with third parties, and the plugin would also need App Tracking Transparency
     // (ios-plan/IOS-PLAN.md). androidPlugins with no ads mode is exactly "every plugin but AdMob".

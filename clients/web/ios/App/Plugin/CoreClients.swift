@@ -38,6 +38,27 @@ final class CoreClients {
         }
     }
 
+    /// Runs one command on the status client - selectOutbound, urlTest, setClashMode,
+    /// closeConnections, as Android's withStatusClient. Off the caller's thread: each is a
+    /// blocking RPC on the command socket. The completion runs on this class's queue.
+    func command(_ body: @escaping (LibboxCommandClient) throws -> Void, completion: @escaping (Error?) -> Void) {
+        queue.async {
+            guard let client = self.statusClient else {
+                completion(TunnelError("core is not running"))
+                return
+            }
+            do {
+                try body(client)
+                completion(nil)
+            } catch {
+                completion(error)
+            }
+        }
+    }
+
+    /// Whether the status client is connected, i.e. the core is up and answering.
+    var isConnected: Bool { queue.sync { statusClient != nil } }
+
     func readLogs(limit: Int) -> [String] {
         queue.sync { Array(logs.suffix(max(0, limit))) }
     }

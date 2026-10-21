@@ -1664,3 +1664,48 @@ func TestProbeOutboundExtraction(t *testing.T) {
 		t.Errorf("transport changed: %s", fields["transport"])
 	}
 }
+
+// --- bound probes (ProbeServersBound, iOS) --------------------------------------------------
+
+// The binding cannot be exercised live here: every test server is on loopback, which sing never
+// binds (N.IsVirtual). What can break on our side is the field itself, so this checks that, for
+// every protocol, the outbound sing-box builds from a bound probe carries it as its own
+// DialerOptions.BindInterface, and that an unbound probe carries none.
+func TestProbeBindInterfaceReachesTheDialer(t *testing.T) {
+	h := probeTestHarness(t)
+	ctx := box.Context(context.Background(), include.InboundRegistry(), include.OutboundRegistry(),
+		include.EndpointRegistry(), include.DNSTransportRegistry(), include.ServiceRegistry(),
+		include.CertificateProviderRegistry())
+	for _, kind := range probeTestKinds {
+		for _, iface := range []string{"", "en0"} {
+			fields, _, err := probeOutbound(probeTestNodeConfig(h.outbound(kind, probeTestHost)))
+			if err != nil {
+				t.Fatalf("%s: %v", kind, err)
+			}
+			probeBind(fields, iface)
+			content, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("%s: %v", kind, err)
+			}
+			parsed, err := singjson.UnmarshalExtendedContext[option.Outbound](ctx, content)
+			if err != nil {
+				t.Fatalf("%s bound to %q: does not parse: %v", kind, iface, err)
+			}
+			wrapper, ok := parsed.Options.(option.DialerOptionsWrapper)
+			if !ok {
+				t.Fatalf("%s: options %T have no dialer options", kind, parsed.Options)
+			}
+			if got := wrapper.TakeDialerOptions().BindInterface; got != iface {
+				t.Errorf("%s: bind_interface %q, want %q", kind, got, iface)
+			}
+		}
+	}
+}
+
+// A tunnel's fakeip answer is dropped from what the resolver returned; real answers stay.
+func TestProbeDropsFakeIPAnswers(t *testing.T) {
+	got := probeParseAnswers("198.18.0.5, 203.0.113.9,198.19.255.1,::ffff:198.18.1.1", probeUsableAddress)
+	if len(got) != 1 || got[0] != netip.MustParseAddr("203.0.113.9") {
+		t.Fatalf("answers %v, want only 203.0.113.9", got)
+	}
+}

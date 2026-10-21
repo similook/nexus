@@ -49,5 +49,16 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<!-- The UI is dark-only (index.html): without this, a light-mode iPhone draws a dark status bar on it. -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
+	<!-- Subscription links are user-provided and many panels serve them over plain http://.
+	     App Review needs a justification for this (research/ios-phase3-research.md §c). The core's
+	     own sockets (the tunnel, probes) are Go and outside ATS either way. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

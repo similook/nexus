@@ -49,8 +49,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 // the 40 MiB GOMEMLIMIT for the extension (runtime.go). Nothing may call libbox's
                 // ReloadSetupOptions afterwards, or the limit goes back to unlimited.
                 let platform = ExtensionPlatformInterface(provider: self)
+                let guarded = try Self.guarded(config)
                 var error: NSError?
-                guard let service = NexuscoreNewService(config, platform, &error) else {
+                guard let service = NexuscoreNewService(guarded, platform, &error) else {
                     throw error ?? PlatformError("the core could not be created")
                 }
                 // Held before start(), so a start that fails is still closed by stopCore below.
@@ -101,6 +102,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         } else {
             try? FileManager.default.removeItem(at: TunnelOptions.persistedNameURL)
         }
+    }
+
+    /// ConfigGuard (nexuscore/config_guard.go): the policy rewrites, and the proxy server's
+    /// hostname resolved here, checked and pinned - the core alone would look it up over DoH,
+    /// which the networks this client is for reset. Runs before every NewService and Reload,
+    /// as ConfigGuard.kt does on Android.
+    private static func guarded(_ config: String) throws -> String {
+        var error: NSError?
+        let guarded = NexuscoreGuardConfig(config, &error)
+        if let error { throw error }
+        return guarded
     }
 
     private func setupOnce() throws {
@@ -162,10 +174,32 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // MARK: - App messages
 
+    /// Shared/AppMessage.swift. Status, logs and URL tests go through the command socket; this
+    /// carries only what that socket cannot.
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
-        // TODO(phase 2+): a one-shot request channel from the app, if one is ever needed (e.g.
-        // nexuscore's FetchViaTunnel). Status, logs and URL tests go through the command socket.
-        completionHandler?(nil)
+        lifecycle.async { [self] in
+            var reply = AppMessage.Reply()
+            do {
+                let message = try JSONDecoder().decode(AppMessage.self, from: messageData)
+                switch message.op {
+                case .reload:
+                    guard let config = message.config, !config.isEmpty else {
+                        throw PlatformError("config is required")
+                    }
+                    guard let service else { throw PlatformError("the tunnel is not running") }
+                    try service.reload(Self.guarded(config))
+                    // What an on-demand or system restart runs from now on.
+                    try persist(config, name: message.name)
+                    log.info("config reloaded")
+                case .uiForeground:
+                    service?.setUIForeground(message.on ?? false)
+                }
+            } catch {
+                log.error("app message failed: \(Self.redacted(error), privacy: .private)")
+                reply.error = Self.redacted(error)
+            }
+            completionHandler?(try? JSONEncoder().encode(reply))
+        }
     }
 
     // MARK: - Errors
