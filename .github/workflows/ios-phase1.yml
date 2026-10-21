@@ -150,6 +150,52 @@ jobs:
         run: |
           app=$(find "$RUNNER_TEMP/dd/Build/Products" -name 'App.app' -maxdepth 3 | head -1)
           echo "::notice title=App.app::$(du -sh "$app" | cut -f1); extension: $(du -sh "$app/PlugIns/PacketTunnel.appex" | cut -f1)"
+      # The app launched in the iOS Simulator, so a crash at launch or a broken plugin bridge
+      # shows up before the borrowed-phone session. Not the tunnel: NetworkExtension does not
+      # run in the Simulator. Debug, so Capacitor logs the bridge and the web console.
+      # Signed to run locally ("-"): the Simulator then applies the entitlements, including the
+      # App Group that Shared/AppGroup.swift requires.
+      - name: Build for the Simulator (Debug)
+        working-directory: clients/web/ios/App
+        run: |
+          set -o pipefail
+          xcodebuild -project Nexus.xcodeproj -scheme App -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd-sim" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee "$RUNNER_TEMP/sim-build.log" | grep -E 'error:|BUILD (SUCCEEDED|FAILED)' | head -100
+      - name: Simulator launch smoke test
+        run: |
+          out="$RUNNER_TEMP/sim"; mkdir -p "$out"
+          app="$RUNNER_TEMP/dd-sim/Build/Products/Debug-iphonesimulator/App.app"
+          udid=$(xcrun simctl list devices available | grep -E '^ +iPhone' | head -1 | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}')
+          echo "simulator: $(xcrun simctl list devices available | grep "$udid" | sed 's/^ *//')"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b > /dev/null
+          xcrun simctl install "$udid" "$app"
+          # NSUnbufferedIO: print() reaches the pipe at once, as when Xcode runs the app.
+          SIMCTL_CHILD_NSUnbufferedIO=YES xcrun simctl launch --console "$udid" io.nexus.app > "$out/console.log" 2>&1 &
+          sleep 30
+          xcrun simctl io "$udid" screenshot "$out/launch.png" || true
+          pid=$(xcrun simctl spawn "$udid" launchctl list | awk '/UIKitApplication:io\.nexus\.app/ {print $1}' | head -1)
+          crashes=$(ls ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -E '^App[-_.].*\.ips$' | tr '\n' ' ')
+          calls="$(grep -aoE 'To Native -> +[A-Za-z]+ +[A-Za-z]+' "$out/console.log" | awk '{print $(NF-1)"."$NF}' | sort | uniq -c | awk '{printf "%s x%s, ", $2, $1}')"
+          echo "::notice title=Plugin calls (first 30 s)::${calls:-none}"
+          lines="$(grep -aE '⚡|\[nexus\]|rror|atal' "$out/console.log" | grep -av 'To Native ->' | head -n 80 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          echo "::notice title=Simulator console::${lines:-empty}"
+          xcrun simctl terminate "$udid" io.nexus.app || true
+          kill %1 2>/dev/null || true
+          if [ -z "$pid" ] || [ "$pid" = "-" ] || [ -n "$crashes" ]; then
+            echo "::error title=Simulator launch::not running 30 s after launch (pid '${pid:-none}'; crash reports: ${crashes:-none})"
+            exit 1
+          fi
+          echo "::notice title=Simulator launch::running 30 s after launch, no crash report"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-simulator-launch
+          path: ${{ runner.temp }}/sim
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Failure tail
         if: failure()
         run: |
@@ -158,8 +204,12 @@ jobs:
             tail="$(tail -n 40 "$g" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
             echo "::error title=generate tail::${tail}"
           fi
-          f="$RUNNER_TEMP/xcodebuild.log"; [ -f "$f" ] || exit 0
-          errs="$(grep -E 'error:' "$f" | sort -u | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
-          echo "::error title=xcodebuild errors::${errs}"
-          tail="$(tail -n 40 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
-          echo "::error title=xcodebuild tail::${tail}"
+          for f in "$RUNNER_TEMP/xcodebuild.log" "$RUNNER_TEMP/sim-build.log"; do
+            [ -f "$f" ] || continue
+            grep -q 'BUILD SUCCEEDED' "$f" && continue
+            name=$(basename "$f" .log)
+            errs="$(grep -E 'error:' "$f" | sort -u | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=${name} errors::${errs}"
+            tail="$(tail -n 40 "$f" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=${name} tail::${tail}"
+          done
