@@ -180,20 +180,37 @@ jobs:
             echo "bundle: $(ls "$app" | tr '\n' ' ')"
           } > "$out/bundle.txt"
           echo "::notice title=App bundle::$(head -n 20 "$out/bundle.txt" | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
-          # NSUnbufferedIO: print() reaches the pipe at once, as when Xcode runs the app.
-          SIMCTL_CHILD_NSUnbufferedIO=YES xcrun simctl launch --console "$udid" io.nexus.app > "$out/console.log" 2>&1 &
+          # Non-blocking launch; the app's stdout/stderr go to files. NSUnbufferedIO: print()
+          # reaches them at once, as when Xcode runs the app.
+          touch "$out/launched"
+          launch=$(SIMCTL_CHILD_NSUnbufferedIO=YES xcrun simctl launch --terminate-running-process \
+            --stdout="$out/stdout.log" --stderr="$out/stderr.log" "$udid" io.nexus.app 2>&1 || true)
+          echo "launch: $launch"
           sleep 30
           xcrun simctl io "$udid" screenshot "$out/launch.png" || true
           pid=$(xcrun simctl spawn "$udid" launchctl list | awk '/UIKitApplication:io\.nexus\.app/ {print $1}' | head -1)
-          crashes=$(ls ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -E '^App[-_.].*\.ips$' | tr '\n' ' ')
+          cat "$out/stdout.log" "$out/stderr.log" > "$out/console.log" 2>/dev/null || true
+          xcrun simctl spawn "$udid" log show --last 2m --style compact --predicate 'process == "App"' \
+            > "$out/unified.log" 2>&1 || true
+          note() { echo "::notice title=$1::$(head -n "${3:-60}" "$2" | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"; }
+          echo "launch: $launch" > "$out/launch.txt"
+          note "Simulator launch command" "$out/launch.txt" 5
           calls="$(grep -aoE 'To Native -> +[A-Za-z]+ +[A-Za-z]+' "$out/console.log" | awk '{print $(NF-1)"."$NF}' | sort | uniq -c | awk '{printf "%s x%s, ", $2, $1}')"
           echo "::notice title=Plugin calls (first 30 s)::${calls:-none}"
-          lines="$(grep -av 'To Native ->' "$out/console.log" | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
-          echo "::notice title=Simulator console::${lines:-empty}"
+          grep -av 'To Native ->' "$out/console.log" > "$out/console-short.log" || true
+          note "Simulator console" "$out/console-short.log" 60
+          grep -aiE 'error|fault|fatal|crash|terminat|exception|assert|dyld|nexus' "$out/unified.log" | grep -v 'To Native' > "$out/unified-short.log" || true
+          note "Unified log (App)" "$out/unified-short.log" 40
+          crashes=""
+          for report in $(find ~/Library/Logs/DiagnosticReports -name '*.ips' -newer "$out/launched" 2>/dev/null); do
+            crashes="$crashes $(basename "$report")"
+            cp "$report" "$out/"
+            python3 .github/scripts/ips-summary.py "$report" > "$out/crash.txt" 2>&1 || true
+            note "Crash $(basename "$report")" "$out/crash.txt" 30
+          done
           xcrun simctl terminate "$udid" io.nexus.app || true
-          kill %1 2>/dev/null || true
           if [ -z "$pid" ] || [ "$pid" = "-" ] || [ -n "$crashes" ]; then
-            echo "::error title=Simulator launch::not running 30 s after launch (pid '${pid:-none}'; crash reports: ${crashes:-none})"
+            echo "::error title=Simulator launch::not running 30 s after launch (pid '${pid:-none}'; crash reports:${crashes:- none})"
             exit 1
           fi
           echo "::notice title=Simulator launch::running 30 s after launch, no crash report"
