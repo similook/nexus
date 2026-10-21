@@ -108,7 +108,7 @@ private final class StatusHandler: NSObject, LibboxCommandClientHandlerProtocol 
     func writeOutbounds(_ message: (any LibboxOutboundGroupItemIteratorProtocol)?) {}
     func initializeClashMode(_ modeList: (any LibboxStringIteratorProtocol)?, currentMode: String?) {}
     func updateClashMode(_ newMode: String?) {}
-    func writeConnectionEvents(_ events: LibboxConnectionEvents?) {}
+    func write(_ events: LibboxConnectionEvents?) {}
 }
 
 /// The log stream only.
@@ -139,5 +139,5 @@ private final class LogHandler: NSObject, LibboxCommandClientHandlerProtocol {
     func writeOutbounds(_ message: (any LibboxOutboundGroupItemIteratorProtocol)?) {}
     func initializeClashMode(_ modeList: (any LibboxStringIteratorProtocol)?, currentMode: String?) {}
     func updateClashMode(_ newMode: String?) {}
-    func writeConnectionEvents(_ events: LibboxConnectionEvents?) {}
+    func write(_ events: LibboxConnectionEvents?) {}
 }

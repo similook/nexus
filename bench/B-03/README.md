@@ -51,9 +51,31 @@ Output: `result.md` (host, versions, load, one row per arm) and `samples-<arm>.c
 
 ## Results
 
-**None recorded yet.** A Windows dev run on 2026-10-20 only proved the harness works (short load;
-Windows working set) and is deliberately not listed.
+Stage 1 only: **estimates**, not the device answer (see "What stage 1 is NOT"). Host: GitHub
+`macos-15` runner, arm64. Load as above, 3 cycles. MiB. Cite as "B-03 host proxy, run <id>".
 
 | Date | Stage / host | Build | Arm | Peak RSS | Peak Go-held | Idle Go-held | GC/min (load) |
 |---|---|---|---|---|---|---|---|
-| — | — | — | — | — | — | — | — |
+| 2026-10-20 | 1 / macos-15 arm64, run 39514110224 | 618a276 | `reality-mlkem` | 67.5 | 40.7 | 38.0 | 51.4 |
+| 2026-10-20 | 1 / macos-15 arm64, run 39514110224 | 618a276 | `vlessenc-x25519` | 67.0 | 43.4 | 38.0 | 8.5 |
+| 2026-10-20 | 1 / macos-15 arm64, run 39514110224 | 618a276 | `reality-vlessenc` | 72.1 | 45.7 | 37.8 | 149.4 |
+| 2026-10-20 | 1 / macos-15 arm64, run 39510421554 | d7bb228 | `vlessenc-x25519` | 65.5 | 40.3 | 38.0 | 7.2 |
+| 2026-10-20 | 1 / macos-15 arm64, run 39510421554 | d7bb228 | `reality-vlessenc` | 75.2 | 46.6 | 38.0 | 144.9 |
+
+(Run 39510421554's `reality-mlkem` row was lost to an off-by-one in the CI annotation filter,
+fixed in 4c22c16.)
+
+Reading, as an estimate:
+
+- **Go-held passes the 40 MiB soft limit under load in every arm** (40.7 to 46.6). GOMEMLIMIT is
+  soft: the runtime goes over rather than fail, and pays for it in GC work.
+- **Idle Go-held settles at ~38 MiB, just under the limit**, so the runtime keeps memory it no
+  longer uses. Against a ~50 MB ceiling that leaves ~12 MB or less for everything stage 1 does
+  not have: the TUN packet stack, Swift and NetworkExtension.
+- **REALITY + VLESS Encryption runs ~150 GC cycles a minute under load**, against ~8 for plain
+  VLESS Encryption. That is CPU, i.e. battery, and the arm closest to the limit.
+- RSS includes the test binary's mapped code and is not iOS `phys_footprint`. Use Go-held.
+
+Stage 2 (the device session, ios-plan/DEVICE-SESSION.md) decides whether the policy needs to
+change. Options if it does, none applied: a lower GOMEMLIMIT for the extension, releasing memory
+on idle, or a lower GOGC.
