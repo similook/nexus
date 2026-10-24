@@ -2,7 +2,7 @@
 
 [![Licence: GPL v3](https://img.shields.io/badge/Licence-GPLv3-blue.svg)](LICENSE)
 
-**A battery-conscious anti-censorship client for Android, built on sing-box 1.14.**
+**A battery-conscious anti-censorship client for Android and Windows, built on sing-box 1.14.**
 
 Nexus is a universal client for reaching the open internet from a restricted network. It is not
 built for any one country or any one filtering technique — it speaks the protocols people
@@ -19,8 +19,20 @@ phone, the thing you actually notice is the battery, and the dominant cost is no
 — it is waking the cellular radio to move a few of them. Nexus is designed so an idle tunnel is
 genuinely idle.
 
-> **Status: v1.1.0.** Android only, `arm64-v8a` only. iOS is designed for but not built.
-> See [Limitations](#limitations) before you install.
+> **Status: v1.3.5** (versionCode 9), built on sing-box v1.14.0. Android (`arm64-v8a` and
+> `armeabi-v7a`, one APK) and Windows 10/11 (64-bit). iOS is in development and not released.
+> See [Compatibility](#compatibility) and [Limitations](#limitations) before you install.
+
+## Download
+
+| | |
+|---|---|
+| **Android, Xiaomi GetApps** | [**Nexus VPN on GetApps**](https://global.app.mi.com/details?id=io.nexus.app). GetApps installs and updates the app itself. A new version appears there after Xiaomi's review, so it can be a few days behind this page. |
+| **Android, APK** | `nexus-v1.3.5.apk` from [Releases](../../releases/latest) |
+| **Windows** | `Nexus_1.3.5_x64-setup.exe` from [Releases](../../releases/latest) |
+
+Both Android downloads are signed with the same key, so either one installs over the other as an
+update, keeping your servers and settings.
 
 ---
 
@@ -66,6 +78,44 @@ Every one of these is checked on every build against sing-box's own validator �
   the foreground.
 - **Real proxied latency** (`Live`) asks the core itself, which is the only test that proves
   your credentials work rather than just that the host answers.
+
+### Device network status
+
+A compact card on the home screen answering one question honestly: *does this phone have a
+working network?* It is read entirely from state Android already maintains — no probe, no
+socket, no timer, no extra permission, and deliberately no numbers.
+
+| Shown | Meaning |
+|---|---|
+| 🟢 **Network OK** | Android validated internet access on the link |
+| 🟡 **Network unverified** | A network exists, but Android could not confirm it reaches the internet |
+| 🟡 **Sign-in required** | A captive portal was detected |
+| 🔴 **No network** | No usable non-VPN network at all |
+| ⚪ **Network status unavailable** | Not determinable — including Android 5.x, where the validation capability does not exist |
+
+The transport is shown alongside: **Wi-Fi**, **Mobile** or **Ethernet**.
+
+Two things it deliberately is not. It **describes the phone's own link, never the tunnel** — the
+query is filtered with `NET_CAPABILITY_NOT_VPN`, so it cannot report `tun0` back at you, and it
+stays correct when some other VPN is active. `Network OK` therefore means the *link* is fine,
+not that your proxy is reachable. And **`Network unverified` is amber rather than red on
+purpose**: Android decides validation by probing a well-known endpoint, and on a censored
+network that probe can fail while your connection works perfectly.
+
+### Staying connected
+
+- **Backgrounding the app no longer looks like a dropped connection.** The status stream is
+  closed while the app is not visible (a backgrounded 1 Hz subscription is ~86,400 wakeups a
+  day); the cancellation that produces is no longer rendered as a connection error over a
+  tunnel that never dropped. Genuine failures still surface.
+- **A connect that stalls can be cancelled.** The button stays live while connecting and aborts
+  on tap, and a start that never completes gives up on its own instead of leaving the UI stuck.
+- **Switching servers is serialised.** The old tunnel is fully torn down and confirmed before
+  the new one starts, which removes a core-level lock timeout that could leave a tunnel with no
+  core behind it.
+- **Connecting does not require a working resolver.** The proxy's address is resolved natively
+  and handed to the core pre-resolved, with the hostname preserved for SNI — which REALITY
+  needs.
 
 ### Getting at it quickly
 
@@ -137,15 +187,17 @@ leaves the WebView's own storage.
 
 ### No telemetry
 
-No analytics, no crash reporting, no phone-home. The app makes exactly three kinds of outbound
-request: the tunnel itself, subscription fetches you asked for, and latency probes you asked
-for.
+No analytics, no crash reporting. The app makes these outbound requests and no others: the
+tunnel itself; subscription fetches you asked for; latency tests and the connection check, which
+go through your server; and, only in copies installed from [Releases](../../releases), one update
+check per launch against this repository. Copies installed from a store, such as Xiaomi GetApps,
+never make that check; the store updates them. Details: [PRIVACY.md](PRIVACY.md).
 
 There is a **promotional slot** in the source, disabled by default (`ENDPOINT = ''` in
 `core/ads.ts`) and inert unless configured. If you build with it enabled, understand what it
 discloses: the request leaves over your **real IP**, because the app is excluded from its own
 VPN. That tells the ad host this address runs a circumvention client. It is documented in full
-at the top of that file.
+at the top of that file. No published version so far contains an ad SDK.
 
 ### Permissions
 
@@ -163,11 +215,12 @@ No storage, no location, no contacts, no phone state, no advertising ID.
 
 ## Install
 
-1. Download `app-release.apk` from [Releases](../../releases/latest).
-2. Check the device is `arm64-v8a` — nearly all phones from 2017 on are. A 32-bit device will
-   install the APK and then fail on connect.
-3. Android will warn about installing from an unknown source. Allow it for your browser or
-   file manager.
+1. Install **Nexus VPN** from [Xiaomi GetApps](https://global.app.mi.com/details?id=io.nexus.app),
+   or download `nexus-v1.3.5.apk` from [Releases](../../releases/latest).
+2. The APK runs on 64-bit (`arm64-v8a`) and 32-bit (`armeabi-v7a`) ARM phones with Android 5.1
+   or later.
+3. For the APK, Android will warn about installing from an unknown source. Allow it for your
+   browser or file manager.
 4. Open Nexus → **Servers** → **Add Subscription**.
 5. Paste your subscription link, or config links, or tap **Scan** for a QR code.
 6. Tap a server to select it, go to **Home**, and press **Connect**.
@@ -176,12 +229,40 @@ No storage, no location, no contacts, no phone state, no advertising ID.
 **Tip:** press **Test All** on the Servers tab before connecting. Nodes showing `n/a` are
 unreachable from your network; pick one with a number.
 
+**Windows:** run `Nexus_1.3.5_x64-setup.exe` from [Releases](../../releases/latest). Connecting
+asks for administrator approval, because the tunnel needs it.
+
 ### Verifying the download
 
 ```bash
-sha256sum app-release.apk     # compare with the checksum in the release notes
-apksigner verify --print-certs app-release.apk
+sha256sum nexus-v1.3.5.apk     # compare with the checksum in the release notes
+apksigner verify --print-certs nexus-v1.3.5.apk
 ```
+
+Every release since v1.0.0 is signed with the same key, so an update installs over the previous
+one without uninstalling and without losing your subscriptions.
+
+---
+
+## Compatibility
+
+| | |
+|---|---|
+| **Platform** | Android, and Windows 10/11 (64-bit). iOS is in development and not released. |
+| **ABI** | `arm64-v8a` and `armeabi-v7a`, in one APK. |
+| **Android** | `minSdk 22` (Android 5.1) — `targetSdk 34`, `compileSdk 34` |
+| **Core** | sing-box **v1.14.0**, pinned, with the patches in [`core/patches/sing-box`](core/patches/sing-box). Core version bumps are a reviewed change. |
+| **Current build** | v1.3.5, versionCode 9 |
+
+On Android 5.x the device-network card reports `Network status unavailable`, because the
+capability it reads only exists from API 23. Everything else behaves the same.
+
+**REALITY** is tested against real Xray servers from 1.8.24 to 26.10.21 — see
+[REALITY compatibility](#reality-compatibility).
+
+Release verification has been carried out on a **Samsung Galaxy A33 5G (SM-A336E) running
+Android 16, arm64**. That is the only device with recorded results; other hardware is expected
+to work but is untested by this project.
 
 ---
 
@@ -200,7 +281,7 @@ apksigner verify --print-certs app-release.apk
                 │  JNI (gomobile)
 ┌───────────────▼──────────────────────────────┐
 │  sing-box 1.14 via libbox   (:core process)  │  Tunnel, routing, DNS
-│  Go, arm64-v8a                               │
+│  Go, arm64-v8a, armeabi-v7a                  │
 └──────────────────────────────────────────────┘
 ```
 
@@ -243,13 +324,89 @@ npm run typecheck
 
 ---
 
-## Build
+## Performance
 
-Requires Go 1.23+, gomobile, Android SDK 34, NDK, JDK 17.
+Two separate things live under this heading, and they are at very different levels of
+evidence. Keeping them apart matters.
+
+### Foreground CPU — measured
+
+v1.3.1 fixed a foreground CPU cost that had been present since before v1.3.0. Two
+connected-state animations on the home screen ran continuously, and each one independently kept
+the WebView compositing at 60 fps; that frame loop, rather than any single element in it, was
+the cost. Both are now limited to three iterations, so the connect feedback still plays and
+then the page goes quiet.
+
+Measured on a **Samsung Galaxy A33 5G (SM-A336E), Android 16, arm64**, by sampling
+`utime + stime` from `/proc/<pid>/stat` over 40–45 s windows, as a percentage of one CPU core:
+
+| Condition | Before | After |
+|---|---|---|
+| Foreground, connected | ~120% | **~12%** |
+| Foreground, disconnected | ~0–1% | ~0–1% |
+| Backgrounded, connected | ~0–0.4% | ~0–0.4% |
+
+Caveats, stated because they are the difference between a measurement and a marketing claim:
+
+- **This is CPU, not energy.** The phone was on USB power throughout, which is exactly why
+  [`bench/B-04`](bench/B-04/) refuses to report energy in that state. **No mAh or
+  battery-percentage saving is claimed.**
+- **One device.** The per-frame cost appeared specific to this device's WebView and GPU stack;
+  how much of it generalises is untested.
+- **Not a `bench/` run.** It is a direct process measurement, recorded here with its method so
+  it can be reproduced or disputed.
+
+### Idle battery — still a design argument
+
+The premise this project is built on — that idle drain, not throughput, is what a phone user
+notices, and that radio wakeups dominate it — remains **a design argument, not a benchmark
+result**. The harness that would settle it exists and is runnable ([`bench/B-04`](bench/B-04/));
+its results table is empty. The CPU figures above say nothing about it, and the gVisor TUN
+stack's CPU cost is still unmeasured. No power figure is claimed anywhere in this repository
+that is not backed by a run in `bench/`, and there are currently none for the shipped stack.
+
+---
+
+## Testing
+
+### Automated
 
 ```bash
-# 1. Build the Go core into an AAR (arm64-v8a)
-cd core && ./scripts/build-android.sh
+./core/scripts/check-configs.sh     # every link shape against libbox.CheckConfig
+cd clients/web
+npm run check-parsers               # 13 exact-string assertions on the URI scanner
+npm run typecheck
+npm run build
+cd android && ./gradlew assembleRelease
+```
+
+### On device
+
+Releases are validated on physical hardware before tagging, not only in a build. For
+v1.3.1 that covered: install as an in-place update (no uninstall, subscriptions
+preserved), connect, real traffic through the tunnel, disconnect with the TUN interface
+confirmed removed, reconnect, background/resume cycles, network-callback registration balance,
+Wi-Fi and mobile identification including a live Wi-Fi→mobile handover with the tunnel
+surviving, and a logcat scan for crashes with every hit attributed to its owning process before
+being classified.
+
+**Not covered**, so as not to imply otherwise: the `Network unverified` and `No network` states
+have never occurred naturally on the test device and are verified by logic only; battery energy
+has not been measured; and no device other than the one named above has recorded results.
+
+---
+
+## Build
+
+Requires Go 1.26+, gomobile, Android SDK 34, NDK, JDK 17.
+
+The version is set in two places, kept in step: `versionCode` / `versionName` in
+`clients/web/android/app/build.gradle`, and `version` in `clients/web/package.json`. The
+current release is **1.3.5 / versionCode 9**.
+
+```bash
+# 1. Build the Go core into an AAR (arm64-v8a and armeabi-v7a)
+cd core && ANDROID_TARGETS=android/arm,android/arm64 ./scripts/build-android.sh
 
 # 2. Build the web UI and sync it into the Android project
 cd ../clients/web && npm install && npm run build && npx cap sync android
@@ -263,61 +420,80 @@ Release signing reads `clients/web/android/keystore.properties`; see
 is deliberate, so a missing keystore fails loudly at install rather than silently producing a
 debug-signed build that cannot be published.
 
+The full release procedure, including the Windows installer and the update manifest, is in
+[`docs/RELEASE.md`](docs/RELEASE.md).
+
 ---
 
 ## Limitations
 
 Stated plainly, because finding these out after installing is worse:
 
-- **Android only.** The Apple `NEPacketTunnelProvider` layer is designed but not implemented.
-- **`arm64-v8a` only.** No 32-bit build.
+- **No iOS release yet.** The iPhone app is in development.
 - **`minSdk 22`** (Android 5.1), `targetSdk 34`.
 - **v2ray `headerType` obfuscation** other than `http` (srtp, utp, wechat-video, dtls) has no
   sing-box equivalent; those nodes are refused at import with a reason rather than imported
   broken.
-- **gVisor's CPU cost is not yet measured.** The battery thesis this project is built on is a
-  design argument, not yet a benchmark result. The harness to settle it exists and is runnable
-  ([`bench/B-04`](bench/B-04/)); the results table there is empty. No power figure is claimed
-  anywhere in this repo that is not backed by a run in `bench/`, and right now there are none
-  for the shipped stack.
+- **gVisor's CPU cost is not yet measured, and neither is idle battery.** The thesis this
+  project is built on is still a design argument rather than a benchmark result — see
+  [Performance](#idle-battery--still-a-design-argument). The v1.3.1 foreground CPU figures do
+  not speak to it.
 - **No split tunnelling UI.** The per-app allow/deny plumbing exists in `NexusVpnService` but
   nothing exposes it.
-- **REALITY servers enforcing a minimum client version above `1.8.1`** need a server-side
-  adjustment to interoperate with the pinned core. Resolved in testing; see below.
 
 ### REALITY compatibility
 
-Nexus pins **sing-box v1.14.0**, whose REALITY client advertises client version **`1.8.1`**.
-The value is a compile-time constant in the core, not something Nexus configures.
+Two things decide whether a REALITY server accepts a client, and Nexus handles both.
 
-A REALITY server may enforce a **minimum client version**. Against a server whose minimum is
-higher than `1.8.1`, the handshake is not accepted, and the REALITY implementation forwards
-the client to its configured destination site instead of rejecting it outright. The client
-then completes an ordinary TLS handshake with that site, receives its certificate rather than
-a REALITY one, and reports `reality verification failed`.
+**The client version.** A REALITY client reports a version, and the server may enforce a
+minimum. sing-box always reported `1.8.1`. Xray **26.7.11 to 26.7.28** treat an empty
+`minClientVer` as `26.3.27`, so every REALITY server on those versions refused Nexus while
+Xray-based apps connected. The symptom is misleading: the server forwards a refused client to
+its destination site, the client receives that site's certificate, and the log says
+`reality verification failed`, which reads like bad credentials. **Since v1.3.5 Nexus reports
+`26.10.21`** ([`core/patches/sing-box`](core/patches/sing-box)). Nothing needs to change on the
+server or in the links. A panel whose `minClientVer` is set higher than `26.10.21` still refuses
+it.
 
-That symptom is misleading, which is the main reason it is documented here: the address
-resolves, TCP connects, the tunnel starts, and only the handshake check fails - so it reads
-like bad credentials rather than a version policy.
+**The ML-KEM key share** (`X25519MLKEM768`). Tested on loopback against real Xray builds:
 
-**This was diagnosed and resolved during testing.** Lowering the server-side minimum client
-version to `1.8.1` and **restarting the server-side REALITY service** resolved it - the
-restart mattered, because saving the setting alone did not apply it to the running process.
-An isolated sing-box v1.14.0 client then passed the REALITY handshake and reached the VLESS
-layer, and the Android client connected and carried real traffic over a long continuous
-session.
+| Xray server | Key share sent | Key share left out |
+|---|---|---|
+| 1.8.24 to 25.4.30 | refused | works |
+| 25.5.16 to 26.7.28 | works | works |
+| 26.9.8 and newer (tested to 26.10.21) | works | refused |
 
-So this is a **client/server version compatibility constraint of the currently pinned
-sing-box**, not a fault in REALITY and not a limitation of Nexus's REALITY support, which
-works. A minimum client version is a legitimate server-side control; lowering it admits older
-REALITY clients generally, so it is a deployment decision rather than a recommendation this
-project makes. Updating the core to a sing-box release advertising a newer REALITY client
-version is the way to retire the constraint - a reviewed change under `CLAUDE.md`, not yet
-done.
+No single setting fits every server, so each REALITY server has an **ML-KEM key share** switch
+in its Details. 3x-ui v3.9.0 and newer put the setting in the link. For other servers, **Test
+All**, and **Connect** once each time the app is started, try both ways and turn the switch on
+when the server refuses the connection without the key share and accepts it with it. A switch
+that is on is never turned off by a check.
+Since v1.3.5 the key share is sent whatever fingerprint the link sets: a fingerprint without it
+falls back to Chrome's handshake. `TestRealityCompatAgainstXray` in `core/` checks all of this
+against those Xray versions.
 
 ---
 
 ## Changelog
+
+### v1.3.5
+
+- **REALITY servers on Xray 26.7.11 to 26.7.28 connect again.** Nexus now reports REALITY client
+  version `26.10.21`; see [REALITY compatibility](#reality-compatibility).
+- **The ML-KEM key share works whatever fingerprint the link sets.**
+- **Undo a delete** of a subscription or a manually added config, for ten seconds.
+- **Reorder servers** by holding one and dragging it. The order survives a subscription update.
+- **Back closes what is open** on Android (server details, dialogs, the QR scanner).
+- **Windows:** Live is a URL test through the connected server, shown in that server's row.
+
+Full notes: [v1.3.5](../../releases/tag/v1.3.5).
+
+### v1.3.2 to v1.3.4
+
+VLESS Encryption, the ML-KEM key share switch and 32-bit Android
+([v1.3.3](../../releases/tag/v1.3.3)); the automatic ML-KEM check
+([v1.3.4](../../releases/tag/v1.3.4)). Full notes, including
+[v1.3.2](../../releases/tag/v1.3.2)'s, are on each release page.
 
 ### v1.3.1
 
@@ -332,21 +508,9 @@ A single CSS change, fixing a foreground CPU cost that predates v1.3.0.
   first nine seconds and then the page goes quiet. Nothing moves, resizes or changes colour;
   the ring and the dot are still drawn exactly as before.
 
-**Measured on the test device** - Samsung Galaxy A33 5G (SM-A336E), Android 16, arm64 -
-by sampling `utime+stime` from `/proc/<pid>/stat` over 40-45 s windows, as a percentage of a
-single CPU core:
-
-| Condition | Before | After |
-|---|---|---|
-| Foreground, connected | ~120% | ~12% |
-| Foreground, disconnected | ~0-1% | ~0-1% |
-| Backgrounded, connected | ~0-0.4% | ~0-0.4% |
-
-These are CPU figures from one device, not a `bench/` run, and they are not a battery
-measurement: the phone was on USB power throughout (which is why `bench/B-04` refuses to
-report energy in that state), so **no mAh or battery-percentage saving is claimed**. How much
-of this translates to other hardware is untested - the per-frame cost looked specific to this
-device's WebView and GPU stack.
+Foreground CPU while connected dropped from ~120% to ~12% of one core on the test device. The
+figures, the method and the caveats that go with them — one device, CPU not energy, no battery
+saving claimed — are in [Performance](#foreground-cpu--measured).
 
 Everything in v1.3.0 is unchanged and still included.
 

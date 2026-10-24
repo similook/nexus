@@ -1,6 +1,6 @@
 # Nexus VPN — Privacy Policy
 
-**Effective date:** 18 October 2026
+**Effective date:** 24 October 2026
 **Publisher:** SNACK VPN APP LIMITED ("we", "us")
 **Contact:** open an issue at https://github.com/similook/nexus/issues
 
@@ -61,14 +61,14 @@ your real IP address. Your other apps' traffic goes through the VPN while it is 
 | Notifications | To show the connection status while the VPN is on, as Android requires. |
 | Start at boot | Only if you turn on auto-connect. Off by default. |
 | Internet and network state | To connect and to notice network changes. |
-| Advertising ID (`AD_ID`) and Android's ad-services permissions | Only in versions that show ads: Google's advertising SDK declares them, and they are used only by Google AdMob, as described in section 5. Versions without ads, such as 1.3.3, do not contain the SDK and do not request them. |
+| Advertising ID (`AD_ID`) and Android's ad-services permissions | Only in versions that show ads: Google's advertising SDK declares them, and they are used only by Google AdMob, as described in section 5. Versions without ads, such as 1.3.3 to 1.3.5, do not contain the SDK and do not request them. |
 
 ## 5. Advertising
 
 Versions of Nexus VPN that show ads display ads from **Google AdMob**, a service of Google LLC /
-Google Ireland Limited. **Version 1.3.3 shows no ads**: it does not contain Google's advertising
-SDK and makes no connection to AdMob. If a later version adds ads, its release notes say so, and
-this section describes how they work.
+Google Ireland Limited. **Versions 1.3.3 to 1.3.5 show no ads**: they do not contain Google's
+advertising SDK and make no connection to AdMob. If a later version adds ads, its release notes
+say so, and this section describes how they work.
 
 - **When an ad appears:** one full-screen ad, only after you tap **Disconnect** inside the app, at
   most once every 3 minutes. Never when the app opens, never when you connect, and never when you
