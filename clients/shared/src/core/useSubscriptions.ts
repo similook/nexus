@@ -27,6 +27,7 @@ import {
   type SubscriptionUserinfo,
 } from './subscription';
 import type { ServerNode } from '../data/servers';
+import { restoreAt, sameSubscription } from './undoDelete';
 
 /**
  * Imported subscriptions, persisted across launches.
@@ -140,6 +141,13 @@ export interface UseSubscriptions {
   refresh: (id: string) => Promise<{ imported: number; failed: number }>;
   remove: (id: string) => void;
   removeManual: (id: string) => void;
+  /**
+   * Undo a delete: put the subscription back at `index`, with its id and data, and persist it.
+   * Nothing happens if the same id or URL has been added again meanwhile (undoDelete.ts).
+   */
+  restore: (record: SubscriptionRecord, index: number) => void;
+  /** Undo a removeManual: the node back at `index` of the manual list, unless it was pasted again. */
+  restoreManual: (node: ServerNode, index: number) => void;
   /**
    * Replace one node with an edited version.
    *
@@ -450,6 +458,37 @@ export function useSubscriptions(): UseSubscriptions {
     });
   }, []);
 
+  /*
+   * Undo for remove and removeManual. Functional updates on purpose: the undo bar calls these
+   * up to ten seconds after the delete, from a closure made before it, and must see the list as
+   * it is now (a refresh or another delete may have landed in between). The configs are rebuilt
+   * with today's ML-KEM switches, which may have changed while the item was gone, exactly as a
+   * load does.
+   */
+  const restore = useCallback((record: SubscriptionRecord, index: number) => {
+    const restored = { ...record, nodes: record.nodes.map((n) => rebuildWithRealityMlkem(n, mlkemRef.current)) };
+    setSubscriptions((prev) => {
+      const next = restoreAt(prev, restored, index, sameSubscription);
+      if (next === null) return prev;
+      save(next);
+      return next;
+    });
+  }, []);
+
+  const restoreManual = useCallback((node: ServerNode, index: number) => {
+    const restored = rebuildWithRealityMlkem(node, mlkemRef.current);
+    setManualNodes((prev) => {
+      const next = restoreAt(prev, restored, index);
+      if (next === null) return prev;
+      try {
+        localStorage.setItem(MANUAL_KEY, JSON.stringify(next));
+      } catch {
+        // Non-fatal; see save().
+      }
+      return next;
+    });
+  }, []);
+
   const nodes = [...subscriptions.flatMap((r) => r.nodes), ...manualNodes];
 
   return {
@@ -470,5 +509,7 @@ export function useSubscriptions(): UseSubscriptions {
     refresh,
     remove,
     removeManual,
+    restore,
+    restoreManual,
   };
 }

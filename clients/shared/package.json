@@ -16,7 +16,8 @@
     "check-routing": "npx --yes tsx scripts/check-routing.mts",
     "check-server-tests": "npx --yes tsx scripts/check-server-tests.mts",
     "check-share": "npx --yes tsx scripts/check-share.mts",
-    "check-reality-mlkem-auto": "npx --yes tsx scripts/check-reality-mlkem-auto.mts"
+    "check-reality-mlkem-auto": "npx --yes tsx scripts/check-reality-mlkem-auto.mts",
+    "check-undo-delete": "npx --yes tsx scripts/check-undo-delete.mts"
   },
   "peerDependencies": {
     "react": "^18.3.1",

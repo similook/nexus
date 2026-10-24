@@ -15,7 +15,8 @@
     "check-update": "npx --yes tsx scripts/check-update.mts",
     "check-server-tests": "npx --yes tsx scripts/check-server-tests.mts",
     "check-ads": "npx --yes tsx scripts/check-ads.mts",
-    "check-reality-mlkem-auto": "npx --yes tsx scripts/check-reality-mlkem-auto.mts"
+    "check-reality-mlkem-auto": "npx --yes tsx scripts/check-reality-mlkem-auto.mts",
+    "check-undo-delete": "npx --yes tsx scripts/check-undo-delete.mts"
   },
   "dependencies": {
     "@capacitor-community/admob": "6.2.0",

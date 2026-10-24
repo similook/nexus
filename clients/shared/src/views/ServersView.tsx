@@ -3,7 +3,7 @@ import { AddSubscriptionDialog } from '../components/AddSubscriptionDialog';
 import { NodeSheet, type NodeSheetTab } from '../components/NodeSheet';
 import { SubscriptionShareSheet } from '../components/SubscriptionShareSheet';
 import { QrScanner } from '../components/QrScanner';
-import { useToast } from '../components/Toast';
+import { useToast, useUndo } from '../components/Toast';
 import { useNexus } from '../core/NexusProvider';
 import type { SubscriptionRecord, UseSubscriptions } from '../core/useSubscriptions';
 import { extractConfigUris, type SubscriptionUserinfo } from '../core/subscription';
@@ -25,6 +25,7 @@ export function ServersView({
 }) {
   const { core } = usePlatform();
   const toast = useToast();
+  const offerUndo = useUndo();
   const { connection, activeConfig } = useNexus();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -213,6 +214,23 @@ export function ServersView({
     );
   };
 
+  /*
+   * Delete at once, with Undo for ten seconds (Toast.tsx's undo bar, undoDelete.ts). The index is
+   * the item's place in its list now; Undo puts it back there with the same id and data. A
+   * second delete replaces the bar and makes this one final.
+   */
+  const handleDelete = (record: SubscriptionRecord) => {
+    const index = subs.subscriptions.findIndex((r) => r.id === record.id);
+    subs.remove(record.id);
+    offerUndo(`${record.name} deleted`, () => subs.restore(record, index));
+  };
+
+  const handleRemoveManual = (node: ServerNode) => {
+    const index = subs.manualNodes.findIndex((n) => n.id === node.id);
+    subs.removeManual(node.id);
+    offerUndo(`${node.name} deleted`, () => subs.restoreManual(node, index));
+  };
+
   const handleRefresh = async (id: string, name: string) => {
     try {
       const { imported, failed } = await subs.refresh(id);
@@ -357,10 +375,7 @@ export function ServersView({
                     <IconBtn
                       label="Delete"
                       danger
-                      onClick={() => {
-                        subs.remove(record.id);
-                        toast(`${record.name} removed`);
-                      }}
+                      onClick={() => handleDelete(record)}
                       path={TRASH_PATH}
                     />
                     <IconBtn
@@ -419,10 +434,7 @@ export function ServersView({
                 <IconBtn
                   label="Remove"
                   danger
-                  onClick={() => {
-                    subs.removeManual(node.id);
-                    toast(`${node.name} removed`);
-                  }}
+                  onClick={() => handleRemoveManual(node)}
                   path={TRASH_PATH}
                 />
               </div>
