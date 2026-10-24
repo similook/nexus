@@ -13,6 +13,8 @@ import { coreEvents } from '../core/coreEvents';
 import { NexusCore } from '../core/plugin';
 import { useServerTests, type DelayCell, type TcpCell, type TestAllSummary } from '../core/useServerTests';
 import { realityMlkemVariant } from '../core/realityMlkem';
+import { ReorderList } from '../components/ReorderList';
+import { movedOrder, orderedNodes, useNodeOrder } from '../core/nodeOrder';
 
 export function ServersView({
   selectedId,
@@ -24,6 +26,8 @@ export function ServersView({
   subs: UseSubscriptions;
 }) {
   const toast = useToast();
+  // The user's own order within each list (long-press and drag; core/nodeOrder.ts).
+  const nodeOrder = useNodeOrder();
   const { connection, activeConfig } = useNexus();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -307,6 +311,7 @@ export function ServersView({
 
         {subs.subscriptions.map((record) => {
           const isOpen = expanded[record.id] ?? true;
+          const ordered = orderedNodes(record.nodes, nodeOrder.orders[record.id]);
           return (
             <div
               key={record.id}
@@ -379,10 +384,14 @@ export function ServersView({
               </div>
 
               {isOpen && (
-                <div className="border-t border-brand-border/40 bg-brand-navy/60 p-2.5 space-y-2">
-                  {record.nodes.map((node) => (
+                <ReorderList
+                  className="border-t border-brand-border/40 bg-brand-navy/60 p-2.5 space-y-2"
+                  items={ordered}
+                  itemKey={(keyed) => keyed.key}
+                  onMove={(from, to) => nodeOrder.setOrder(record.id, movedOrder(ordered, from, to, (keyed) => keyed.key))}
+                >
+                  {({ node }) => (
                     <NodeRow
-                      key={node.id}
                       node={node}
                       selected={node.id === selectedId}
                       onSelect={handleSelect}
@@ -391,8 +400,8 @@ export function ServersView({
                       onReason={(reason) => toast(reason, '⚠')}
                       onInspect={(n, tab) => setSheet({ node: n, tab })}
                     />
-                  ))}
-                </div>
+                  )}
+                </ReorderList>
               )}
             </div>
           );
@@ -406,8 +415,17 @@ export function ServersView({
               </h3>
               <span className="text-[11px] text-brand-muted">{subs.manualNodes.length} items</span>
             </div>
-            {subs.manualNodes.map((node) => (
-              <div key={node.id} className="flex items-center gap-2">
+            <ReorderList
+              className="space-y-2"
+              items={orderedNodes(subs.manualNodes, nodeOrder.orders.manual)}
+              itemKey={(keyed) => keyed.key}
+              onMove={(from, to) => {
+                const manual = orderedNodes(subs.manualNodes, nodeOrder.orders.manual);
+                nodeOrder.setOrder('manual', movedOrder(manual, from, to, (keyed) => keyed.key));
+              }}
+            >
+              {({ node }) => (
+              <div className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <NodeRow
                     node={node}
@@ -429,7 +447,8 @@ export function ServersView({
                   path="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79"
                 />
               </div>
-            ))}
+              )}
+            </ReorderList>
           </div>
         )}
 
