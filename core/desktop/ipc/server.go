@@ -34,6 +34,10 @@ const StatusInterval = time.Second
 // short enough that a full sweep of a dead subscription does not feel hung.
 const pingTimeout = 3 * time.Second
 
+// liveURLTestTimeout bounds Live's URL test: sing-box's own connect and request timeouts, with
+// margin, as Android's PING_CORE_MAX_MS.
+const liveURLTestTimeout = 25 * time.Second
+
 // Server is the daemon: it owns the tunnel and serves the contract to connected clients.
 //
 // ONE TUNNEL, MANY CLIENTS. The tunnel is process state, not connection state — a GUI that
@@ -744,22 +748,17 @@ func (s *Server) pingProxy() {
 		return
 	}
 
-	// Phase 3 measures reachability through the tunnel the only way this package can without
-	// a handle on sing-box's outbound: a plain dial, which with a system-wide TUN up does go
-	// through the tunnel. That makes this number meaningful here, unlike tcpPing above — the
-	// tunnel is exactly what it is supposed to measure.
-	started := time.Now()
-	dialer := net.Dialer{Timeout: pingTimeout}
-	connection, err := dialer.Dial("tcp", "1.1.1.1:443")
+	// sing-box's URL test through the running "proxy" outbound, as Android's Live: the number
+	// the Delay column holds (Tunnel.URLTest). It used to be a plain TCP dial to 1.1.1.1:443
+	// through the TUN, which measured reachability of that address, not this server, and so was
+	// kept out of the Delay column.
+	delay, err := active.URLTest(liveURLTestTimeout, "")
 	if err != nil {
 		s.clients.broadcast(event(EventProxyDelay, ProxyDelayEvent{DelayMS: -1, Ok: false}))
 		return
 	}
-	elapsed := time.Since(started)
-	_ = connection.Close()
-
 	s.clients.broadcast(event(EventProxyDelay, ProxyDelayEvent{
-		DelayMS: int(elapsed.Milliseconds()),
+		DelayMS: int(delay),
 		Ok:      true,
 	}))
 }

@@ -56,6 +56,7 @@ import (
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/trafficcontrol"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/log"
@@ -301,6 +302,29 @@ func (t *Tunnel) SetMode(mode string) error {
 		return fmt.Errorf("sing-box did not switch to routing mode %q", mode)
 	}
 	return nil
+}
+
+// URLTest measures the running tunnel the way Android's Live does: sing-box's URL test
+// (urltest.URLTest; link "" is its default, the one Test All's Delay uses) through this
+// tunnel's own "proxy" outbound. So the number proves the server answers with these
+// credentials, and belongs in the Delay column like Android's.
+//
+// The test runs in the tunnel's service context, whose certificate store the request needs, cut
+// to timeout. It opens one connection through the proxy and closes it.
+func (t *Tunnel) URLTest(timeout time.Duration, link string) (uint16, error) {
+	t.mu.Lock()
+	instance, started, base := t.instance, t.started, t.ctx
+	t.mu.Unlock()
+	if instance == nil || !started || base == nil {
+		return 0, errors.New("tunnel: not started")
+	}
+	outbound, ok := instance.Outbound().Outbound("proxy")
+	if !ok {
+		return 0, errors.New(`tunnel: no "proxy" outbound`)
+	}
+	ctx, cancel := context.WithTimeout(base, timeout)
+	defer cancel()
+	return urltest.URLTest(ctx, link, outbound)
 }
 
 // CloseConnections closes every connection the core has open, so that each is routed afresh

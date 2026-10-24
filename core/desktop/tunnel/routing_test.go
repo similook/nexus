@@ -618,3 +618,26 @@ func freePort(t *testing.T) int {
 	defer listener.Close()
 	return listener.Addr().(*net.TCPAddr).Port
 }
+
+// Live on desktop is sing-box's URL test through the tunnel's own "proxy" outbound, as Android's,
+// not a dial to a fixed address: the request goes to the proxy, for the URL test's host.
+func TestURLTestGoesThroughTheProxyOutbound(t *testing.T) {
+	h := newHarness(t, "", "")
+	go func() { _, _ = h.tunnel.URLTest(3*time.Second, "http://urltest.example.test/generate_204") }()
+	select {
+	case host := <-h.proxy.requests:
+		if host != "urltest.example.test" {
+			t.Fatalf("the proxy was asked for %q, want the URL test's host", host)
+		}
+	case host := <-h.direct.requests:
+		t.Fatalf("the URL test went direct, to %q", host)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the URL test reached no outbound")
+	}
+}
+
+func TestURLTestNeedsAStartedTunnel(t *testing.T) {
+	if _, err := (&Tunnel{}).URLTest(time.Second, ""); err == nil {
+		t.Fatal("a tunnel that never started ran a URL test")
+	}
+}

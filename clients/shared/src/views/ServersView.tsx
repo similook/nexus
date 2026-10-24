@@ -61,19 +61,22 @@ export function ServersView({
   const totalNodes = subs.nodes.length;
 
   /**
-   * Live: the core's own answer for the running tunnel, shown as a toast.
-   *
-   * NOT written into a row. On desktop nexusd's pingProxy is a TCP dial through the tunnel, not
-   * the URL test the Delay column holds (core/desktop/ipc/server.go), so the two would share a
-   * column without measuring the same thing. The rows' Delay comes from Test All's per-server
-   * probe only.
+   * Live: the running tunnel's own URL test, through its proxy outbound - nexusd's pingProxy is
+   * sing-box's URL test since 1.3.5 (desktop/tunnel URLTest), the same measurement as Android's
+   * and as the Delay column. So, as on Android, it is written to the RUNNING node's row (never
+   * the selection, which can differ), and shown as a toast. When the app cannot say which node
+   * is running (activeConfig is null), the number is shown and credited to none.
    */
   useEffect(
     () =>
       coreEvents.subscribe('proxyDelay', ({ delayMs, ok }) => {
+        const running = activeConfig === null
+          ? undefined
+          : subs.nodes.find((n) => n.config === activeConfig);
+        if (running) tests.recordLive(running.id, ok ? delayMs : null);
         toast(ok ? `${delayMs} ms through the tunnel` : 'No response through the tunnel', ok ? undefined : '⚠');
       }),
-    [toast],
+    [activeConfig, subs.nodes, toast, tests.recordLive],
   );
 
   /**
