@@ -149,6 +149,76 @@ func TestVLESSEncryptionPanelMatrixAgainstXray(t *testing.T) {
 	}
 }
 
+// REALITY compatibility beyond the key share, found on a panel running Xray 26.7.28
+// (2026-10-22): the client version the server checks, and an ML-KEM opt-in on a fingerprint
+// whose uTLS Client Hello has no X25519MLKEM768 share. Both failed as "reality verification
+// failed" while Xray clients worked.
+func TestRealityCompatAgainstXray(t *testing.T) {
+	bin := os.Getenv("NEXUS_XRAY_BIN")
+	if bin == "" {
+		t.Skip("NEXUS_XRAY_BIN not set")
+	}
+	const uuid = "11111111-2222-3333-4444-555555555555"
+	strict := xrayRejectsWithoutMLKEM(t, bin)
+	old := xrayRejectsMLKEMShare(t, bin)
+	t.Logf("xray refuses the ML-KEM share: %v; refuses its absence: %v", old, strict)
+	echoPort := matrixEchoServer(t)
+	target := matrixTLSTarget(t)
+	cases := []struct {
+		name         string
+		minClientVer string
+		fingerprint  string
+		mlkemShare   bool
+		works        bool
+	}{
+		// The server as installed, nothing set.
+		{"default/mlkem-share=true", "", "chrome", true, !old},
+		{"default/mlkem-share=false", "", "chrome", false, !strict},
+		// What Xray v26.7.11 to v26.7.28 apply when minClientVer is empty (Xray-core af7eb680),
+		// set explicitly so every Xray binary checks it. Upstream sing-box reports 1.8.1.
+		{"minClientVer=26.3.27/mlkem-share=false", "26.3.27", "chrome", false, !strict},
+		{"minClientVer=26.3.27/mlkem-share=true", "26.3.27", "chrome", true, !old},
+		// No X25519MLKEM768 share in uTLS's firefox or safari: the opt-in falls back to Chrome.
+		{"fingerprint=firefox/mlkem-share=true", "", "firefox", true, !old},
+		{"fingerprint=safari/mlkem-share=true", "", "safari", true, !old},
+		{"fingerprint=firefox/mlkem-share=false", "", "firefox", false, !strict},
+	}
+	for _, c := range cases {
+		t.Run("reality/"+c.name, func(t *testing.T) {
+			realityKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// "dest" and "tcp" for Xray before v24.x ("target" and "raw" are the newer names;
+			// newer releases read both), so this test runs against old panels' servers too.
+			settings := map[string]any{
+				"target":      fmt.Sprintf("127.0.0.1:%d", target),
+				"dest":        fmt.Sprintf("127.0.0.1:%d", target),
+				"serverNames": []string{"localhost"},
+				"privateKey":  b64(realityKey.Bytes()),
+				"shortIds":    []string{"ab"},
+			}
+			if c.minClientVer != "" {
+				settings["minClientVer"] = c.minClientVer
+			}
+			port := startXrayInbound(t, bin, map[string]any{
+				"clients":    []any{map[string]any{"id": uuid, "flow": vless.FlowVision}},
+				"decryption": "none",
+			}, map[string]any{"network": "tcp", "security": "reality", "realitySettings": settings}, echoPort)
+			reality := map[string]any{"enabled": true, "public_key": b64(realityKey.PublicKey().Bytes()), "short_id": "ab"}
+			if c.mlkemShare {
+				reality["support_x25519mlkem768"] = true
+			}
+			socks := matrixClientBox(t, port, uuid, "none", vless.FlowVision, map[string]any{
+				"enabled": true, "server_name": "localhost",
+				"utls":    map[string]any{"enabled": true, "fingerprint": c.fingerprint},
+				"reality": reality,
+			})
+			realityExpect(t, socks, c.works)
+		})
+	}
+}
+
 // startXrayInbound runs an Xray VLESS inbound on 127.0.0.1 with the given settings and stream
 // settings, routing every request to the echo server on target, and returns its port.
 func startXrayInbound(t *testing.T, bin string, settings, stream map[string]any, target int) int {
@@ -285,7 +355,7 @@ func realityExpect(t *testing.T, socks string, works bool) {
 		return
 	}
 	if socks5EchoWorks(socks, 3_000) {
-		t.Fatal("the server accepted a REALITY hello without the X25519MLKEM768 key share; want it refused")
+		t.Fatal("the server accepted this REALITY hello; want it refused")
 	}
 }
 
@@ -317,9 +387,25 @@ func socks5EchoWorks(socks string, size int) bool {
 	return bytes.Equal(got, payload)
 }
 
-// xrayRejectsWithoutMLKEM reports whether the Xray binary is v26.9.8 or newer, from
-// `xray version` ("Xray 26.9.9 (Xray, Penetrates Everything.) ...").
+// xrayRejectsWithoutMLKEM reports whether the Xray binary is v26.9.8 or newer: those refuse a
+// REALITY hello without the X25519MLKEM768 key share.
 func xrayRejectsWithoutMLKEM(t *testing.T, bin string) bool {
+	t.Helper()
+	return xrayVersionAtLeast(t, bin, [3]int{26, 9, 8})
+}
+
+// xrayRejectsMLKEMShare reports whether the Xray binary is older than v25.5.16: those refuse a
+// REALITY hello WITH the X25519MLKEM768 key share. Found by bisecting builds of each release
+// (2026-10-22): 1.8.24, 24.12.31 and 25.1.30 to 25.4.30 refuse it; 25.5.16 and every later
+// release tested accept it. So no single key-share setting suits every server.
+func xrayRejectsMLKEMShare(t *testing.T, bin string) bool {
+	t.Helper()
+	return !xrayVersionAtLeast(t, bin, [3]int{25, 5, 16})
+}
+
+// xrayVersionAtLeast compares the binary's `xray version` ("Xray 26.9.9 (Xray, Penetrates
+// Everything.) ...") with want.
+func xrayVersionAtLeast(t *testing.T, bin string, want [3]int) bool {
 	t.Helper()
 	out, err := exec.Command(bin, "version").Output()
 	if err != nil {
@@ -333,5 +419,10 @@ func xrayRejectsWithoutMLKEM(t *testing.T, bin string) bool {
 	for i := range v {
 		v[i], _ = strconv.Atoi(string(m[i+1]))
 	}
-	return v[0] > 26 || (v[0] == 26 && (v[1] > 9 || (v[1] == 9 && v[2] >= 8)))
+	for i := range v {
+		if v[i] != want[i] {
+			return v[i] > want[i]
+		}
+	}
+	return true
 }

@@ -247,8 +247,9 @@ func assertAuthenticates(t *testing.T, hello clientHello, serverKey *ecdh.Privat
 		t.Fatalf("%s: server would reject this ClientHello", rule)
 	}
 	plain := openSessionID(t, hello, serverKey, peerPub)
-	if !bytes.Equal(plain[:3], []byte{1, 8, 1}) {
-		t.Errorf("%s: advertised client version %v, want unchanged 1.8.1", rule, plain[:3])
+	// Not upstream's fixed 1.8.1, which Xray v26.7.11-v26.7.28 servers refuse by default.
+	if !bytes.Equal(plain[:3], tls.RealityClientVersion[:]) {
+		t.Errorf("%s: advertised client version %v, want %v", rule, plain[:3], tls.RealityClientVersion)
 	}
 	if !bytes.Equal(plain[8:16], []byte{0xab, 0, 0, 0, 0, 0, 0, 0}) {
 		t.Errorf("%s: short id %x, want ab00000000000000", rule, plain[8:16])
@@ -274,7 +275,7 @@ func TestRealityDefaultStripsMLKEM(t *testing.T) {
 }
 
 // Opted in: X25519MLKEM768 is offered before X25519 in both extensions, both server rules
-// accept the hello, and the auth key and client version are what they were.
+// accept the hello, and the auth key is what it was.
 func TestRealityOptInKeepsMLKEM(t *testing.T) {
 	hello, serverKey := captureHello(t, tlsOptionsJSON("chrome", `,"support_x25519mlkem768":true`))
 	if !hasGroup(hello.groups, groupX25519MLKEM768) {
@@ -312,25 +313,24 @@ func TestRealityOptInSurvivesClone(t *testing.T) {
 	}
 }
 
-// A fingerprint without an X25519MLKEM768 share sends the same groups either way: the option
-// keeps a share, it never invents one.
-func TestRealityOptInDoesNotChangeOtherFingerprints(t *testing.T) {
+// A fingerprint whose uTLS Client Hello has no X25519MLKEM768 share sends that hello unless the
+// outbound opts in. Opted in, it falls back to Chrome's: the share is offered before X25519 and
+// both server rules accept the hello. Without the fallback the opt-in sent nothing new, and
+// servers since XTLS/REALITY 8cdf7bf refused the node while Xray clients connected.
+func TestRealityOptInFallsBackToChromeForOtherFingerprints(t *testing.T) {
 	for _, fingerprint := range []string{"firefox", "safari", "ios", "edge"} {
 		off, _ := captureHello(t, tlsOptionsJSON(fingerprint, ""))
-		on, _ := captureHello(t, tlsOptionsJSON(fingerprint, `,"support_x25519mlkem768":true`))
-		groups := func(h clientHello) []uint16 {
-			var g []uint16
-			for _, s := range h.shares {
-				g = append(g, s.group)
-			}
-			return g
+		if shareIndex(off.shares, groupX25519MLKEM768) >= 0 {
+			t.Errorf("%s: X25519MLKEM768 offered without the opt-in", fingerprint)
 		}
-		if shareIndex(on.shares, groupX25519MLKEM768) >= 0 {
-			t.Errorf("%s: X25519MLKEM768 appeared", fingerprint)
+		on, serverKey := captureHello(t, tlsOptionsJSON(fingerprint, `,"support_x25519mlkem768":true`))
+		mlkem, x25519 := shareIndex(on.shares, groupX25519MLKEM768), shareIndex(on.shares, groupX25519)
+		if mlkem < 0 || x25519 < 0 || mlkem > x25519 {
+			t.Errorf("%s opted in: X25519MLKEM768 at %d, X25519 at %d; want MLKEM first, both present", fingerprint, mlkem, x25519)
+			continue
 		}
-		if len(groups(off)) != len(groups(on)) {
-			t.Errorf("%s: key shares changed %#x -> %#x", fingerprint, groups(off), groups(on))
-		}
+		assertAuthenticates(t, on, serverKey, fingerprint+" new server", newRule(on.shares))
+		assertAuthenticates(t, on, serverKey, fingerprint+" old server", oldRule(on.shares))
 	}
 }
 

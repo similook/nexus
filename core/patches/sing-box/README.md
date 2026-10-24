@@ -17,27 +17,37 @@ When true, the strip is skipped and the fingerprint's own key shares are sent un
 (for `chrome`: GREASE, `X25519MLKEM768`, `X25519`). When absent or false, the code path is the
 upstream one, byte for byte.
 
+**Two more changes (2026-10-22), found on a panel running Xray 26.7.28 that every sing-box
+client failed on with `reality verification failed` while Xray clients worked:**
+- **The client version.** Upstream reports a fixed `1.8.1`. Xray v26.7.11–v26.7.28 servers
+  default an empty `minClientVer` to `26.3.27` (Xray-core `af7eb680`) and refuse it. The patch
+  reports `RealityClientVersion` (`26.10.21`), the newest Xray release the REALITY matrix test
+  (`nexuscore/vless_encryption_matrix_test.go`) runs against, as Xray clients report their own.
+  Servers use the value only for `minClientVer`/`maxClientVer`. Bump it with that test.
+- **A fingerprint without the share.** In uTLS v1.8.7 only the Chrome fingerprints carry an
+  `X25519MLKEM768` share, so for `firefox`, `safari`, `ios`, `edge`, `android`, `360`, `qq` (and
+  often `random`) the opt-in sent nothing new. An opted-in outbound whose Client Hello has no
+  such share now falls back to `HelloChrome_Auto`. REALITY servers do not check the fingerprint.
+
+Both are covered by `TestRealityCompatAgainstXray` and the matrix test, run against Xray
+26.3.27, 26.7.28, 26.9.9, 26.9.30 and 26.10.21 (all pass; each change reverted fails them).
+
 **What it does not change.**
-- The advertised REALITY client version stays `1.8.1`. Servers whose `minClientVer` is above
-  that (or Xray v26.7.11–v26.7.28, which apply a built-in 26.3.27 minimum when it is empty)
-  still refuse the client. That is deliberate and out of scope.
 - The REALITY auth key is still derived from the standalone `X25519` share, which is the share
   both older and newer REALITY servers authenticate with.
-- Fingerprints without an `X25519MLKEM768` share in uTLS v1.8.7 (`firefox`, `safari`, `ios`,
-  `edge`, `android`, `360`, `qq`) send the same ClientHello either way.
+- Without the option, every fingerprint sends exactly upstream's ClientHello: the share is
+  stripped, and no fingerprint is replaced (the Chrome fallback above applies only when the
+  outbound opts in).
 
-**Who sets it.** The Nexus link parser sets it only when a REALITY link carries
-`support-x25519mlkem768=true` (3x-ui adds this parameter to its REALITY share links). It is
-never enabled by default.
+**Who sets it.** Never on by default. The link parsers (`clients/web/src/core/subscription.ts`
+for Android and iOS, `clients/shared/src/core/subscription.ts` for desktop) set it when a
+REALITY link carries `support-x25519mlkem768=true` (3x-ui adds this parameter to its REALITY
+share links), and the per-server ML-KEM switch sets it for one server
+(`src/core/realityMlkem.ts`, in both clients): by the user, or automatically when a check finds
+the server refuses the node without the share and accepts it with the share.
 
-**Android only, for now.** Only the Android parser (`clients/web/src/core/subscription.ts`)
-sets the option. The desktop client parses links with its own copy in `clients/shared`, which
-does not, so desktop sends the same ClientHello as before and cannot reach the servers above.
-`nexusd` is still built from the patched module (the `replace` covers every Go build in
-`core/`), which is why `build-desktop.sh` and the Makefile test targets run the prepare script
-too. Do not count on `clients/shared`'s drift check to flag this gap: it already reported
-`subscription.ts` (and most other copies) as CHANGED before this patch, so the patch adds no
-new signal there. Porting the parser change to `clients/shared` is a separate, deliberate step.
+`nexusd` is built from the patched module too (the `replace` covers every Go build in `core/`),
+which is why `build-desktop.sh` and the Makefile test targets run the prepare script.
 
 **Dropping it.** If upstream sing-box ships an equivalent option, remove the `replace` line in
 `core/go.mod`, delete this directory and the prepare script, and map the parser flag to the
