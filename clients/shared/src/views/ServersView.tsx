@@ -3,7 +3,7 @@ import { AddSubscriptionDialog } from '../components/AddSubscriptionDialog';
 import { NodeSheet, type NodeSheetTab } from '../components/NodeSheet';
 import { SubscriptionShareSheet } from '../components/SubscriptionShareSheet';
 import { QrScanner } from '../components/QrScanner';
-import { useToast } from '../components/Toast';
+import { useToast, useUndo } from '../components/Toast';
 import { useNexus } from '../core/NexusProvider';
 import type { SubscriptionRecord, UseSubscriptions } from '../core/useSubscriptions';
 import { extractConfigUris, type SubscriptionUserinfo } from '../core/subscription';
@@ -29,6 +29,7 @@ export function ServersView({
   const toast = useToast();
   // The user's own order within each list (long-press and drag; core/nodeOrder.ts).
   const nodeOrder = useNodeOrder();
+  const offerUndo = useUndo();
   const { connection, activeConfig } = useNexus();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -220,6 +221,23 @@ export function ServersView({
     );
   };
 
+  /*
+   * Delete at once, with Undo for ten seconds (Toast.tsx's undo bar, undoDelete.ts). The index is
+   * the item's place in its list now; Undo puts it back there with the same id and data. A
+   * second delete replaces the bar and makes this one final.
+   */
+  const handleDelete = (record: SubscriptionRecord) => {
+    const index = subs.subscriptions.findIndex((r) => r.id === record.id);
+    subs.remove(record.id);
+    offerUndo(`${record.name} deleted`, () => subs.restore(record, index));
+  };
+
+  const handleRemoveManual = (node: ServerNode) => {
+    const index = subs.manualNodes.findIndex((n) => n.id === node.id);
+    subs.removeManual(node.id);
+    offerUndo(`${node.name} deleted`, () => subs.restoreManual(node, index));
+  };
+
   const handleRefresh = async (id: string, name: string) => {
     try {
       const { imported, failed } = await subs.refresh(id);
@@ -365,11 +383,8 @@ export function ServersView({
                     <IconBtn
                       label="Delete"
                       danger
-                      onClick={() => {
-                        subs.remove(record.id);
-                        toast(`${record.name} removed`);
-                      }}
-                      path="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+                      onClick={() => handleDelete(record)}
+                      path={TRASH_PATH}
                     />
                     <IconBtn
                       label={isOpen ? 'Collapse' : 'Expand'}
@@ -440,11 +455,8 @@ export function ServersView({
                 <IconBtn
                   label="Remove"
                   danger
-                  onClick={() => {
-                    subs.removeManual(node.id);
-                    toast(`${node.name} removed`);
-                  }}
-                  path="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79"
+                  onClick={() => handleRemoveManual(node)}
+                  path={TRASH_PATH}
                 />
               </div>
               )}
@@ -567,6 +579,10 @@ function UserinfoPanel({ info }: { info: SubscriptionUserinfo | null }) {
     </div>
   );
 }
+
+/** Heroicons' outline trash, lid included: the same path as Logs → Clear. */
+const TRASH_PATH =
+  'M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0';
 
 function IconBtn({
   label,
