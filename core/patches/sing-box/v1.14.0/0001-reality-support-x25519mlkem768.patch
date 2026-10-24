@@ -1,5 +1,5 @@
 diff --git a/common/tls/reality_client.go b/common/tls/reality_client.go
-index af64ef6..63cef1f 100644
+index af64ef6..5d36c62 100644
 --- a/common/tls/reality_client.go
 +++ b/common/tls/reality_client.go
 @@ -45,10 +45,11 @@ import (
@@ -27,7 +27,7 @@ index af64ef6..63cef1f 100644
  	if options.KernelRx || options.KernelTx {
  		if !C.IsLinux {
  			return nil, E.New("kTLS is only supported on Linux")
-@@ -145,22 +146,26 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
+@@ -145,21 +146,38 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
  	if err != nil {
  		return nil, err
  	}
@@ -36,6 +36,27 @@ index af64ef6..63cef1f 100644
 -			ce.Curves = common.Filter(ce.Curves, func(curveID utls.CurveID) bool {
 -				return curveID != utls.X25519MLKEM768
 -			})
+-		}
+-		if ks, ok := extension.(*utls.KeyShareExtension); ok {
+-			ks.KeyShares = common.Filter(ks.KeyShares, func(share utls.KeyShare) bool {
+-				return share.Group != utls.X25519MLKEM768
+-			})
++	// Nexus patch: an outbound that opts in must actually send an X25519MLKEM768 share, and in
++	// uTLS v1.8.7 only the Chrome fingerprints carry one (firefox, safari, ios, edge, android,
++	// 360 and qq never do; random and randomized only sometimes). REALITY servers never check
++	// the fingerprint, so such an outbound falls back to Chrome instead of sending a Client
++	// Hello that servers since XTLS/REALITY 8cdf7bf reject.
++	if e.supportX25519MLKEM768 && !realityHasKeyShare(uConn, utls.X25519MLKEM768) {
++		uConn = utls.UClient(conn, uConfig, utls.HelloChrome_Auto)
++		verifier.UConn = uConn
++		err = uConn.BuildHandshakeState()
++		if err != nil {
++			return nil, err
+ 		}
+ 	}
+-	err = uConn.BuildHandshakeState()
+-	if err != nil {
+-		return nil, err
 +	// Nexus patch: the strip is unchanged unless the outbound opts in. REALITY servers since
 +	// XTLS/REALITY 8cdf7bf (Xray v26.9.8) reject a Client Hello without X25519MLKEM768.
 +	if !e.supportX25519MLKEM768 {
@@ -50,31 +71,59 @@ index af64ef6..63cef1f 100644
 +					return share.Group != utls.X25519MLKEM768
 +				})
 +			}
- 		}
--		if ks, ok := extension.(*utls.KeyShareExtension); ok {
--			ks.KeyShares = common.Filter(ks.KeyShares, func(share utls.KeyShare) bool {
--				return share.Group != utls.X25519MLKEM768
--			})
++		}
 +		err = uConn.BuildHandshakeState()
 +		if err != nil {
 +			return nil, err
- 		}
++		}
  	}
--	err = uConn.BuildHandshakeState()
--	if err != nil {
--		return nil, err
--	}
  
  	if len(uConfig.NextProtos) > 0 {
- 		for _, extension := range uConn.Extensions {
-@@ -271,6 +276,7 @@ func (e *RealityClientConfig) Clone() Config {
+@@ -183,9 +201,13 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
+ 	}
+ 	binary.BigEndian.PutUint64(hello.SessionId, uint64(nowTime.Unix()))
+ 
+-	hello.SessionId[0] = 1
+-	hello.SessionId[1] = 8
+-	hello.SessionId[2] = 1
++	// Nexus patch: the client version REALITY servers check against minClientVer and
++	// maxClientVer (and nothing else). Upstream sends a fixed 1.8.1, which Xray v26.7.11 to
++	// v26.7.28 servers refuse even with no minClientVer set: they default it to 26.3.27
++	// (Xray-core af7eb680).
++	hello.SessionId[0] = RealityClientVersion[0]
++	hello.SessionId[1] = RealityClientVersion[1]
++	hello.SessionId[2] = RealityClientVersion[2]
+ 	binary.BigEndian.PutUint32(hello.SessionId[4:], uint32(time.Now().Unix()))
+ 	copy(hello.SessionId[8:], e.shortID[:])
+ 	if debug.Enabled {
+@@ -271,7 +293,27 @@ func (e *RealityClientConfig) Clone() Config {
  		e.uClient.Clone().(*UTLSClientConfig),
  		e.publicKey,
  		e.shortID,
 +		e.supportX25519MLKEM768,
++	}
++}
++
++// RealityClientVersion is the version this client reports to REALITY servers: the newest Xray
++// release whose REALITY server it is tested against (Nexus nexuscore's REALITY matrix test),
++// as Xray clients report their own. Bump it with that test.
++var RealityClientVersion = [3]byte{26, 10, 21}
++
++// realityHasKeyShare reports whether the built Client Hello carries a key share for group.
++func realityHasKeyShare(uConn *utls.UConn, group utls.CurveID) bool {
++	for _, extension := range uConn.Extensions {
++		if keyShares, ok := extension.(*utls.KeyShareExtension); ok {
++			for _, share := range keyShares.KeyShares {
++				if share.Group == group {
++					return true
++				}
++			}
++		}
  	}
++	return false
  }
  
+ type realityVerifier struct {
 diff --git a/option/tls.go b/option/tls.go
 index 5c807d6..9dd6913 100644
 --- a/option/tls.go
