@@ -274,8 +274,8 @@ function MlkemRow({ state, running, onChange }: MlkemSwitch) {
   const note =
     state === 'link' ? "Turned on by this server's link."
     : running ? 'This server is connected. Disconnect to change it; the running tunnel keeps the setting it started with.'
-    : state === 'auto' ? 'Turned on automatically: this server refused the connection without it ("Handshake failed") and accepted it with it. You can turn it off.'
-    : 'For REALITY servers that fail with "Handshake failed" because the panel leaves this out of the link (Xray 26.9.8 or newer). Turned on automatically when Test All or a first Connect finds a server needs it. Off sends the same handshake as before.';
+    : state === 'auto' ? 'Turned on automatically: this server refused the connection without it ("Handshake failed") and accepted it with it. If you turn it off, it turns on again the next time a check finds the server still needs it.'
+    : 'For REALITY servers that fail with "Handshake failed" because the panel leaves this out of the link (Xray 26.9.8 or newer). Turned on automatically when Test All, or the first Connect after the app starts, finds a server needs it. Off sends the same handshake as before.';
 
   return (
     <div className="mt-4 p-3 rounded-xl bg-brand-navy border border-brand-border space-y-2">

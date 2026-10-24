@@ -422,8 +422,11 @@ export function useSubscriptions(): UseSubscriptions {
     [],
   );
 
+  // The keys a verdict was reached for since launch: Connect checks each server once a session.
+  const checkedRef = useRef(new Set<string>());
+
   const realityMlkemUncheckedFor = useCallback(
-    (node: ServerNode) => realityMlkemUnchecked(node, mlkemRef.current, originsRef.current),
+    (node: ServerNode) => realityMlkemUnchecked(node, mlkemRef.current, originsRef.current, checkedRef.current),
     [],
   );
 
@@ -431,6 +434,7 @@ export function useSubscriptions(): UseSubscriptions {
     (node: ServerNode, needed: boolean): ServerNode => {
       const next = withRealityMlkemVerdict(mlkemRef.current, originsRef.current, node, needed);
       const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
+      if (key !== null) checkedRef.current.add(key);
       if (next === null || key === null) return node;
       commitOrigins(next.origins);
       if (!needed) return node;

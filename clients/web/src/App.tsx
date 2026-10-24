@@ -168,9 +168,9 @@ function Shell() {
    * user tapped a list row.
    */
   /**
-   * The node exactly as Connect must start it. A REALITY server no check has looked at yet is
-   * probed first, with and without the ML-KEM key share (realityMlkemCheck.ts): once per
-   * server, a couple of seconds. When it needs the share, the switch turns on and the rebuilt
+   * The node exactly as Connect must start it. A REALITY server whose switch is OFF is probed
+   * first, with and without the ML-KEM key share (realityMlkemCheck.ts): once per server per app
+   * session, one handshake when it connects without the share, a couple of seconds otherwise. When it needs the share, the switch turns on and the rebuilt
    * node comes back; otherwise the node is returned as it is.
    */
   const prepareConnect = useCallback(

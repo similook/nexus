@@ -165,9 +165,17 @@ export function carryRealityMlkem(
 // Who set the switch is kept beside it, keyed the same way:
 //   absent      nobody yet. OFF; the next check may decide.
 //   'auto-on'   a check found the server needs the share. ON, shown as "turned on automatically".
-//   'auto-off'  a check found the server accepts a hello without it. OFF; a later Test All that
+//   'auto-off'  a check found the server accepts a hello without it. OFF; a later check that
 //               sees "Handshake failed" may still turn it on (the server was upgraded).
-//   'user'      the user flipped the switch. Never changed by a check again.
+//   'user'      the user flipped the switch. A check never turns a user's ON off. It may turn a
+//               user's OFF on, but only on proof: the server refuses the node without the share
+//               and accepts it with the share. Nobody wants a switch kept in the position that
+//               does not connect.
+//
+// Connect checks a checkable node once per app session (realityMlkemUnchecked): a server that
+// worked without the share and was upgraded since is caught at the next launch, not only by a
+// Test All. A server that accepts the node without the share answers on the first probe, so the
+// check costs one handshake before such a Connect.
 
 export type RealityMlkemOrigin = 'auto-on' | 'auto-off' | 'user';
 
@@ -200,27 +208,32 @@ export function saveRealityMlkemOrigins(origins: ReadonlyMap<string, RealityMlke
 }
 
 /**
- * May a check turn this node's switch on? REALITY with a key, not opted in by its link, OFF,
- * and never set by the user.
+ * May a check turn this node's switch on? REALITY with a key, not opted in by its link, and
+ * OFF, whoever left it OFF (see the origins above). The origins are kept for callers; an ON switch
+ * is never checkable, so no check can turn one off.
  */
 export function realityMlkemCheckable(
   node: ServerNode,
   keys: ReadonlySet<string>,
-  origins: ReadonlyMap<string, RealityMlkemOrigin>,
+  _origins: ReadonlyMap<string, RealityMlkemOrigin>,
 ): boolean {
   if (realityMlkemState(node, keys) !== 'off') return false;
   const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
-  return key !== null && origins.get(key) !== 'user';
+  return key !== null;
 }
 
-/** Checkable and never checked: Connect looks at it before starting. */
+/**
+ * Checkable and not checked yet in this app session (`checked`, the keys a verdict was reached
+ * for since launch): Connect looks at it before starting.
+ */
 export function realityMlkemUnchecked(
   node: ServerNode,
   keys: ReadonlySet<string>,
   origins: ReadonlyMap<string, RealityMlkemOrigin>,
+  checked: ReadonlySet<string> = new Set(),
 ): boolean {
   const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
-  return key !== null && realityMlkemCheckable(node, keys, origins) && !origins.has(key);
+  return key !== null && realityMlkemCheckable(node, keys, origins) && !checked.has(key);
 }
 
 /** The node with the share offered: what a check probes beside the node as it is. */
@@ -252,7 +265,8 @@ export function withRealityMlkemVerdict(
 ): { keys: Set<string>; origins: Map<string, RealityMlkemOrigin> } | null {
   const key = node.uri === undefined ? null : realityMlkemKey(node.uri);
   if (key === null || !realityMlkemCheckable(node, keys, origins)) return null;
-  if (!needed && origins.get(key) === 'auto-off') return null;
+  // A server that connects without the share changes nothing an earlier verdict or the user set.
+  if (!needed && (origins.get(key) === 'auto-off' || origins.get(key) === 'user')) return null;
   const nextKeys = new Set(keys);
   const nextOrigins = new Map(origins);
   if (needed) nextKeys.add(key);

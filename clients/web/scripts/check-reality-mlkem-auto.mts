@@ -71,9 +71,15 @@ const NO_ORIGINS: ReadonlyMap<string, Origin> = new Map();
   check('opted in by its link: never', !rm.realityMlkemCheckable(optedIn, NONE, NO_ORIGINS));
   check('already ON (user): never', !rm.realityMlkemCheckable(legacy, new Set([keyOf(legacy)]), NO_ORIGINS));
   const userOff = new Map<string, Origin>([[keyOf(legacy), 'user']]);
-  check('turned OFF by the user: never', !rm.realityMlkemCheckable(legacy, NONE, userOff));
+  // 1.3.5: a switch the user left OFF is checkable too - a check turns it on only on proof.
+  check('turned OFF by the user: checkable', rm.realityMlkemCheckable(legacy, NONE, userOff));
   const autoOff = new Map<string, Origin>([[keyOf(legacy), 'auto-off']]);
-  check('auto-off: still checkable (the server may be upgraded) but not unchecked', rm.realityMlkemCheckable(legacy, NONE, autoOff) && !rm.realityMlkemUnchecked(legacy, NONE, autoOff));
+  check('auto-off: still checkable (the server may be upgraded)', rm.realityMlkemCheckable(legacy, NONE, autoOff));
+  // Connect checks once per app session, whatever an earlier session decided.
+  check('auto-off: unchecked until checked this session', rm.realityMlkemUnchecked(legacy, NONE, autoOff));
+  check('checked this session: not unchecked', !rm.realityMlkemUnchecked(legacy, NONE, autoOff, new Set([keyOf(legacy)])));
+  check('another server checked this session: still unchecked', rm.realityMlkemUnchecked(legacy, NONE, NO_ORIGINS, new Set([keyOf(second)])));
+  check('ON (user): never unchecked', !rm.realityMlkemUnchecked(legacy, new Set([keyOf(legacy)]), new Map<string, Origin>([[keyOf(legacy), 'user']])));
   check('the variant offers the share, the node does not', hasShare(rm.realityMlkemVariant(legacy)) && !hasShare(legacy));
   check('the variant is exactly the link that opts in by itself', rm.realityMlkemVariant(legacy).config === optedIn.config);
 }
@@ -97,7 +103,9 @@ const NO_ORIGINS: ReadonlyMap<string, Origin> = new Map();
   check('auto-off, then needed (server upgraded): turns on', upgraded !== null && upgraded.keys.has(keyOf(legacy)) && upgraded.origins.get(keyOf(legacy)) === 'auto-on');
 
   const userOff = new Map<string, Origin>([[keyOf(legacy), 'user']]);
-  check('the user turned it off: a verdict changes nothing', rm.withRealityMlkemVerdict(NONE, userOff, legacy, true) === null);
+  const userOffOn = rm.withRealityMlkemVerdict(NONE, userOff, legacy, true);
+  check('the user left it off, the server needs the share: turns on, origin auto-on', userOffOn !== null && userOffOn.keys.has(keyOf(legacy)) && userOffOn.origins.get(keyOf(legacy)) === 'auto-on');
+  check('the user left it off, the server does not need it: nothing changes (origin stays user)', rm.withRealityMlkemVerdict(NONE, userOff, legacy, false) === null);
   check('not REALITY: a verdict changes nothing', rm.withRealityMlkemVerdict(NONE, NO_ORIGINS, plain, true) === null);
   check('opted in by link: a verdict changes nothing', rm.withRealityMlkemVerdict(NONE, NO_ORIGINS, optedIn, false) === null);
 
@@ -107,7 +115,10 @@ const NO_ORIGINS: ReadonlyMap<string, Origin> = new Map();
     const origins = rm.withRealityMlkemUserChoice(on.origins, legacy);
     check('user turns auto-on off: allowed', keys !== null && !keys.has(keyOf(legacy)));
     check('user turns auto-on off: origin user, state off', keys !== null && origins.get(keyOf(legacy)) === 'user' && rm.realityMlkemState(legacy, keys, origins) === 'off');
-    check('...and no check turns it back on', keys !== null && rm.withRealityMlkemVerdict(keys, origins, legacy, true) === null);
+    // 1.3.5: OFF that does not connect is not kept - proof turns it back on.
+    const back = keys === null ? null : rm.withRealityMlkemVerdict(keys, origins, legacy, true);
+    check('...and a check that proves it needed turns it back on', back !== null && back.keys.has(keyOf(legacy)) && back.origins.get(keyOf(legacy)) === 'auto-on');
+    check('...but a check that finds it not needed leaves it off', keys !== null && rm.withRealityMlkemVerdict(keys, origins, legacy, false) === null);
   }
 }
 
