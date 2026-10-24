@@ -3,6 +3,7 @@ import { Clipboard } from '@capacitor/clipboard';
 import { applyEdit, describeNode, editableOf } from '../core/nodeDetails';
 import type { RealityMlkemState } from '../core/realityMlkem';
 import type { ServerNode } from '../data/servers';
+import { useBackClose } from '../core/backButton';
 
 /**
  * Details / edit / share for one node.
@@ -36,6 +37,8 @@ export function NodeSheet({
   onClose: () => void;
   onToast: (message: string, icon?: string) => void;
 }) {
+  // Android back (and Escape) closes this - see core/backButton.ts.
+  useBackClose(node !== null, onClose);
   const [tab, setTab] = useState<NodeSheetTab>(initialTab);
   const [revealed, setRevealed] = useState(false);
   const [draft, setDraft] = useState({ name: '', server: '', port: '' });

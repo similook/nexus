@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useBackClose } from '../core/backButton';
 
 /**
  * Full-screen QR scanner for importing configs.
@@ -43,6 +44,8 @@ export function QrScanner({
   onResult: (text: string) => void;
   onClose: () => void;
 }) {
+  // Android back (and Escape) closes this - see core/backButton.ts.
+  useBackClose(open, onClose);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [status, setStatus] = useState<Status>('starting');
 

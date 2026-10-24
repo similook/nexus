@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Clipboard } from '@capacitor/clipboard';
 import type { SubscriptionRecord } from '../core/useSubscriptions';
+import { useBackClose } from '../core/backButton';
 
 /**
  * Share a subscription: its link as a QR code, plus Copy link.
@@ -21,6 +22,8 @@ export function SubscriptionShareSheet({
   onClose: () => void;
   onToast: (message: string, icon?: string) => void;
 }) {
+  // Android back (and Escape) closes this - see core/backButton.ts.
+  useBackClose(record !== null, onClose);
   const [qr, setQr] = useState<string | null>(null);
 
   // Loaded on demand, as in NodeSheet: the encoder is ~130KB and only this sheet needs it.

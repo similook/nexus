@@ -11,6 +11,7 @@ import { protocolOf, type ServerNode } from './data/servers';
 import { HomeView } from './views/HomeView';
 import { LogsView } from './views/LogsView';
 import { ServersView } from './views/ServersView';
+import { setBackFallback } from './core/backButton';
 
 export function App() {
   return (
@@ -26,6 +27,19 @@ export function App() {
 
 function Shell() {
   const [tab, setTab] = useState<Tab>('home');
+
+  // With no sheet open, back on another tab goes to Home; on Home it minimises the app
+  // (core/backButton.ts). A ref, so the one fallback always sees the current tab.
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  useEffect(() => {
+    setBackFallback(() => {
+      if (tabRef.current === 'home') return false;
+      setTab('home');
+      return true;
+    });
+    return () => setBackFallback(null);
+  }, []);
   /**
    * null until something is imported. There are no built-in nodes any more, so a fresh install
    * genuinely has nothing selected - and the UI must say so rather than point at a placeholder

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { classifyImport } from '../core/subscription';
+import { useBackClose } from '../core/backButton';
 
 /**
  * One field for everything the user can paste.
@@ -37,6 +38,8 @@ export function AddSubscriptionDialog({
   onScan: () => void;
   onClose: () => void;
 }) {
+  // Android back (and Escape) closes this - see core/backButton.ts.
+  useBackClose(open, onClose);
   const [text, setText] = useState('');
 
   /**

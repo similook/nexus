@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { usePlatform } from '../platform';
 import type { SubscriptionRecord } from '../core/useSubscriptions';
+import { useBackClose } from '../core/backButton';
 
 /**
  * Share a subscription: its link as a QR code, plus Copy link.
@@ -24,6 +25,8 @@ export function SubscriptionShareSheet({
   onClose: () => void;
   onToast: (message: string, icon?: string) => void;
 }) {
+  // Android back (and Escape) closes this - see core/backButton.ts.
+  useBackClose(record !== null, onClose);
   const { clipboard } = usePlatform();
   const [qr, setQr] = useState<string | null>(null);
   const link = record === null ? null : shareableSubscriptionUrl(record.url);
