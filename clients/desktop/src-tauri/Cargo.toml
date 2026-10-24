@@ -1,6 +1,6 @@
 [package]
 name = "nexus-desktop"
-version = "1.3.4"
+version = "1.3.5"
 description = "Nexus desktop shell (ADR-0003 Phase 4): window, tray, and an opaque forwarder to nexusd"
 authors = ["the Nexus contributors"]
 license = "GPL-3.0-or-later"
